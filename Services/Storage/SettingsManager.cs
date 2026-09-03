@@ -4,13 +4,23 @@ using ScreenTranslator.Models;
 
 namespace ScreenTranslator.Services.Storage;
 
-public class SettingsManager
+public static class SettingsManager
 {
     private static readonly string SettingsDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), 
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "ScreenTranslator");
-        
+
     private static readonly string SettingsFile = Path.Combine(SettingsDir, "settings.json");
+
+    private static readonly JsonSerializerOptions ReadOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private static readonly JsonSerializerOptions WriteOptions = new()
+    {
+        WriteIndented = true
+    };
 
     public static string? LastError { get; private set; }
 
@@ -22,10 +32,7 @@ public class SettingsManager
             if (File.Exists(SettingsFile))
             {
                 var json = File.ReadAllText(SettingsFile);
-                var settings = JsonSerializer.Deserialize<AppSettings>(json, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                var settings = JsonSerializer.Deserialize<AppSettings>(json, ReadOptions);
                 if (settings != null) return settings;
             }
         }
@@ -47,8 +54,7 @@ public class SettingsManager
                 Directory.CreateDirectory(SettingsDir);
             }
 
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            var json = JsonSerializer.Serialize(settings, options);
+            var json = JsonSerializer.Serialize(settings, WriteOptions);
             File.WriteAllText(SettingsFile, json);
             return true;
         }

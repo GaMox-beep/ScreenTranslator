@@ -7,7 +7,7 @@ namespace ScreenTranslator.ViewModels;
 
 public class MainViewModel : ViewModelBase
 {
-    private AppSettings _settings;
+    private readonly AppSettings _settings;
     private ProviderInfo? _selectedProvider;
     private string _customBaseUrl = string.Empty;
     private bool _isCustomUrlVisible;
@@ -133,7 +133,7 @@ public class MainViewModel : ViewModelBase
         CustomBaseUrl = _settings.CustomBaseUrl;
 
         // Chọn provider
-        var matchedProvider = Providers.FirstOrDefault(p => 
+        var matchedProvider = Providers.FirstOrDefault(p =>
             p.Name.Equals(_settings.Provider, StringComparison.OrdinalIgnoreCase) ||
             p.Id.Equals(_settings.Provider, StringComparison.OrdinalIgnoreCase)) ?? Providers.FirstOrDefault();
 
@@ -144,20 +144,20 @@ public class MainViewModel : ViewModelBase
             ? (matchedProvider?.Models.FirstOrDefault() ?? string.Empty)
             : _settings.Model;
 
-        SelectedSourceLanguage = SourceLanguages.Contains(_settings.SourceLanguage) 
-            ? _settings.SourceLanguage 
+        SelectedSourceLanguage = SourceLanguages.Contains(_settings.SourceLanguage)
+            ? _settings.SourceLanguage
             : "Auto Detect";
 
-        SelectedTargetLanguage = TargetLanguages.Contains(_settings.TargetLanguage) 
-            ? _settings.TargetLanguage 
+        SelectedTargetLanguage = TargetLanguages.Contains(_settings.TargetLanguage)
+            ? _settings.TargetLanguage
             : "Vietnamese";
 
-        SelectedModifier = Modifiers.Contains(_settings.HotkeyModifier) 
-            ? _settings.HotkeyModifier 
+        SelectedModifier = Modifiers.Contains(_settings.HotkeyModifier)
+            ? _settings.HotkeyModifier
             : "Alt";
 
-        SelectedKey = Keys.Contains(_settings.HotkeyKey) 
-            ? _settings.HotkeyKey 
+        SelectedKey = Keys.Contains(_settings.HotkeyKey)
+            ? _settings.HotkeyKey
             : "Q";
     }
 

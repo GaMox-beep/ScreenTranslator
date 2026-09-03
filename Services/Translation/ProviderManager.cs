@@ -4,8 +4,13 @@ using ScreenTranslator.Models;
 
 namespace ScreenTranslator.Services.Translation;
 
-public class ProviderManager
+public static class ProviderManager
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     private static List<ProviderInfo>? _cachedProviders;
     public static string? LastError { get; private set; }
 
@@ -20,10 +25,7 @@ public class ProviderManager
             if (File.Exists(filePath))
             {
                 var json = File.ReadAllText(filePath);
-                _cachedProviders = JsonSerializer.Deserialize<List<ProviderInfo>>(json, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                _cachedProviders = JsonSerializer.Deserialize<List<ProviderInfo>>(json, JsonOptions);
 
                 if (_cachedProviders != null && _cachedProviders.Count > 0)
                 {
@@ -45,6 +47,7 @@ public class ProviderManager
         return _cachedProviders;
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Minor Code Smell", "S1075:URIs should not be hardcoded", Justification = "Default fallback presets")]
     private static List<ProviderInfo> GetDefaultProviders() => new()
     {
         new ProviderInfo
