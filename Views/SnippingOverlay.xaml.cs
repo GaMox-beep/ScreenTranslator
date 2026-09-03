@@ -30,11 +30,23 @@ public partial class SnippingOverlay : Window
         };
     }
 
+    private static SnippingOverlay? _currentOverlay;
+
     public static void StartSnipping(Action<Rect> onAreaSelected)
     {
+        // Nếu màn hình quét đang mở sẵn, bấm Alt+Q lần nữa sẽ hủy/đóng thay vì mở đè lên làm tối màn hình
+        if (_currentOverlay != null)
+        {
+            _currentOverlay.Close();
+            return;
+        }
+
         var overlay = new SnippingOverlay();
+        _currentOverlay = overlay;
+        overlay.Closed += (_, _) => _currentOverlay = null;
         overlay.AreaSelected += onAreaSelected;
         overlay.Show();
+        overlay.Activate();
     }
 
     private void Window_MouseDown(object sender, MouseButtonEventArgs e)
