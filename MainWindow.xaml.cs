@@ -1,5 +1,7 @@
 using System.Windows;
+using ScreenTranslator.Services.Capture;
 using ScreenTranslator.Services.Hotkey;
+using ScreenTranslator.Services.Ocr;
 using ScreenTranslator.ViewModels;
 using ScreenTranslator.Views;
 
@@ -8,6 +10,7 @@ namespace ScreenTranslator;
 public partial class MainWindow : Window
 {
     private readonly GlobalHotkeyManager _hotkeyManager = new();
+    private readonly WindowsMediaOcr _ocrEngine = new();
     private MainViewModel ViewModel => (MainViewModel)DataContext;
 
     public MainWindow()
@@ -35,10 +38,38 @@ public partial class MainWindow : Window
 
     private void OnHotkeyPressed()
     {
-        // Khi bấm phím tắt ở bất cứ đâu trong Windows, mở màn hình quét
-        SnippingOverlay.StartSnipping(area =>
+        SnippingOverlay.StartSnipping(async (area, dpiScaleX, dpiScaleY) =>
         {
-            ViewModel.SetStatus($"Đã quét vùng: {(int)area.Width}x{(int)area.Height} tại ({(int)area.X}, {(int)area.Y})", isError: false);
+            try
+            {
+                ViewModel.SetStatus("⏳ Đang nhận diện chữ...", isError: false);
+
+                // 1. Chụp ảnh vùng chọn hoàn toàn trong bộ nhớ RAM
+                using var bitmap = ScreenCaptureService.CaptureRegion(area, dpiScaleX, dpiScaleY);
+
+                // 2. Nhận diện chữ bằng Windows Media OCR (Offline, 0MB phụ thuộc)
+                var recognizedText = await _ocrEngine.RecognizeTextAsync(bitmap, ViewModel.SelectedSourceLanguage);
+
+                // 3. Nếu không có chữ: dừng lại ngay (tiết kiệm token)
+                if (string.IsNullOrWhiteSpace(recognizedText))
+                {
+                    ViewModel.SetStatus("⚠️ Không tìm thấy văn bản nào trong vùng chọn.", isError: false);
+                    return;
+                }
+
+                // 4. Hiển thị chữ đã nhận diện thành công
+                var previewText = recognizedText.Replace(Environment.NewLine, " ");
+                if (previewText.Length > 60)
+                {
+                    previewText = previewText[..57] + "...";
+                }
+
+                ViewModel.SetStatus($"🔍 Đã nhận diện: \"{previewText}\"", isError: false);
+            }
+            catch (Exception ex)
+            {
+                ViewModel.SetStatus($"❌ Lỗi nhận diện: {ex.Message}", isError: true);
+            }
         });
     }
 

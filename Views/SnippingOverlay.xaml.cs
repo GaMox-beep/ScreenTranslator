@@ -2,6 +2,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 
+using System.Windows.Media;
+
 namespace ScreenTranslator.Views;
 
 public partial class SnippingOverlay : Window
@@ -9,7 +11,7 @@ public partial class SnippingOverlay : Window
     private Point _startPoint;
     private bool _isSelecting;
 
-    public event Action<Rect>? AreaSelected;
+    public event Action<Rect, double, double>? AreaSelected;
 
     public SnippingOverlay()
     {
@@ -32,7 +34,7 @@ public partial class SnippingOverlay : Window
 
     private static SnippingOverlay? _currentOverlay;
 
-    public static void StartSnipping(Action<Rect> onAreaSelected)
+    public static void StartSnipping(Action<Rect, double, double> onAreaSelected)
     {
         // Nếu màn hình quét đang mở sẵn, bấm Alt+Q lần nữa sẽ hủy/đóng thay vì mở đè lên làm tối màn hình
         if (_currentOverlay != null)
@@ -109,7 +111,8 @@ public partial class SnippingOverlay : Window
         if (width > 10 && height > 10)
         {
             var absoluteRect = new Rect(x + Left, y + Top, width, height);
-            AreaSelected?.Invoke(absoluteRect);
+            var dpi = VisualTreeHelper.GetDpi(this);
+            AreaSelected?.Invoke(absoluteRect, dpi.DpiScaleX, dpi.DpiScaleY);
         }
     }
 
