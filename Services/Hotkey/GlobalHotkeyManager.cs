@@ -31,22 +31,22 @@ public class GlobalHotkeyManager
     {
         Unregister();
 
+        var vk = ParseVirtualKey(keyStr);
+        if (vk == 0) return false;
+
         _windowHandle = new WindowInteropHelper(window).Handle;
-        if (_windowHandle == IntPtr.Zero)
-        {
-            // Nếu Window chưa nạp handle, đợi Loaded
-            return false;
-        }
+        if (_windowHandle == IntPtr.Zero) return false;
 
         _hwndSource = HwndSource.FromHwnd(_windowHandle);
         _hwndSource?.AddHook(HwndHook);
 
         var modifier = ParseModifier(modifierStr);
-        var vk = ParseVirtualKey(keyStr);
-
-        if (vk == 0) return false;
-
         _isRegistered = RegisterHotKey(_windowHandle, HotkeyId, modifier | ModNoRepeat, vk);
+        if (!_isRegistered)
+        {
+            Unregister();
+        }
+
         return _isRegistered;
     }
 

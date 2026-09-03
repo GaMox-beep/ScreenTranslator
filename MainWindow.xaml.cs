@@ -49,7 +49,6 @@ public partial class MainWindow : Window
 
     private void BtnSave_Click(object sender, RoutedEventArgs e)
     {
-        ViewModel.ApiKey = TxtApiKey.Password;
         ViewModel.SaveSettings();
         RegisterCurrentHotkey();
     }
