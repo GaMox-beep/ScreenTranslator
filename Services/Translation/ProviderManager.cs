@@ -47,7 +47,6 @@ public static class ProviderManager
         return _cachedProviders;
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Minor Code Smell", "S1075:URIs should not be hardcoded", Justification = "Default fallback presets")]
     private static List<ProviderInfo> GetDefaultProviders() => new()
     {
         new ProviderInfo

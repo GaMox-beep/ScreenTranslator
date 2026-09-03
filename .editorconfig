@@ -38,13 +38,7 @@ dotnet_naming_symbols.interface_symbols.applicable_kinds = interface
 dotnet_naming_style.interface_style.required_prefix = I
 dotnet_naming_style.interface_style.capitalization = pascal_case
 
-# 6. SonarAnalyzer & Code Analysis rules cấu hình sẵn
-# Không để rỗng catch block (Swallowed exception)
-dotnet_diagnostic.S108.severity = warning
-
-# Cho phép thuộc tính instance trong ViewModel (phục vụ WPF DataBinding)
+# 6. Quy tắc Code Analysis (Microsoft .NET Analyzers)
+# Cho phép thuộc tính instance trong ViewModel phục vụ WPF DataBinding
 dotnet_diagnostic.CA1822.severity = none
-dotnet_diagnostic.S2325.severity = none
 
-# Cho phép các class placeholder tạm thời chưa viết code
-dotnet_diagnostic.S2094.severity = suggestion
