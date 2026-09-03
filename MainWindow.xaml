@@ -1,10 +1,19 @@
 <Window x:Class="ScreenTranslator.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:ScreenTranslator.ViewModels"
         Title="ScreenTranslator - Cài đặt" 
-        Width="460" Height="420"
+        Width="480" Height="480"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanMinimize">
+
+    <Window.DataContext>
+        <vm:MainViewModel/>
+    </Window.DataContext>
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+    </Window.Resources>
 
     <Grid Margin="15">
         <Grid.RowDefinitions>
@@ -15,28 +24,48 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Nhóm 1: API OpenRouter -->
-        <GroupBox Grid.Row="0" Header="Cấu hình OpenRouter API" Margin="0,0,0,10" Padding="10">
+        <!-- Nhóm 1: API & Provider -->
+        <GroupBox Grid.Row="0" Header="Cấu hình Dịch thuật &amp; Nhà cung cấp API" Margin="0,0,0,10" Padding="10">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="80"/>
+                    <ColumnDefinition Width="85"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <Label Grid.Row="0" Grid.Column="0" Content="API Key:" VerticalAlignment="Center"/>
-                <PasswordBox x:Name="TxtApiKey" Grid.Row="0" Grid.Column="1" Height="26" VerticalContentAlignment="Center"/>
+                <!-- 1. Chọn Provider -->
+                <Label Grid.Row="0" Grid.Column="0" Content="Provider:" VerticalAlignment="Center"/>
+                <ComboBox Grid.Row="0" Grid.Column="1" Height="26" 
+                          ItemsSource="{Binding Providers}" 
+                          SelectedItem="{Binding SelectedProvider}" 
+                          DisplayMemberPath="Name"/>
 
-                <Label Grid.Row="1" Grid.Column="0" Content="Model:" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                <ComboBox x:Name="CmbModel" Grid.Row="1" Grid.Column="1" Height="26" IsEditable="True" Margin="0,8,0,0">
-                    <ComboBoxItem Content="google/gemini-2.0-flash-001" IsSelected="True"/>
-                    <ComboBoxItem Content="google/gemini-2.0-flash-exp:free"/>
-                    <ComboBoxItem Content="meta-llama/llama-3.3-70b-instruct:free"/>
-                    <ComboBoxItem Content="deepseek/deepseek-chat"/>
-                </ComboBox>
+                <!-- 2. Base URL (Hiện khi chọn Custom) -->
+                <Label Grid.Row="1" Grid.Column="0" Content="Base URL:" 
+                       VerticalAlignment="Center" Margin="0,8,0,0" 
+                       Visibility="{Binding IsCustomUrlVisible, Converter={StaticResource BoolToVis}}"/>
+                <TextBox Grid.Row="1" Grid.Column="1" Height="26" 
+                         VerticalContentAlignment="Center" Margin="0,8,0,0" 
+                         Text="{Binding CustomBaseUrl, UpdateSourceTrigger=PropertyChanged}"
+                         Visibility="{Binding IsCustomUrlVisible, Converter={StaticResource BoolToVis}}"/>
+
+                <!-- 3. API Key -->
+                <Label Grid.Row="2" Grid.Column="0" Content="API Key:" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                <PasswordBox x:Name="TxtApiKey" Grid.Row="2" Grid.Column="1" Height="26" 
+                             VerticalContentAlignment="Center" Margin="0,8,0,0"
+                             PasswordChanged="TxtApiKey_PasswordChanged"/>
+
+                <!-- 4. Model (Cập nhật động theo Provider) -->
+                <Label Grid.Row="3" Grid.Column="0" Content="Model:" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                <ComboBox Grid.Row="3" Grid.Column="1" Height="26" 
+                          ItemsSource="{Binding AvailableModels}"
+                          Text="{Binding SelectedModel, UpdateSourceTrigger=PropertyChanged}"
+                          IsEditable="True" Margin="0,8,0,0"/>
             </Grid>
         </GroupBox>
 
@@ -51,24 +80,18 @@
 
                 <StackPanel Grid.Column="0">
                     <Label Content="Nguồn:" Padding="0,0,0,3"/>
-                    <ComboBox x:Name="CmbSourceLang" Height="26">
-                        <ComboBoxItem Content="Auto Detect" IsSelected="True"/>
-                        <ComboBoxItem Content="English"/>
-                        <ComboBoxItem Content="Japanese"/>
-                        <ComboBoxItem Content="Chinese"/>
-                        <ComboBoxItem Content="Korean"/>
-                    </ComboBox>
+                    <ComboBox Height="26" 
+                              ItemsSource="{Binding SourceLanguages}" 
+                              SelectedItem="{Binding SelectedSourceLanguage}"/>
                 </StackPanel>
 
                 <TextBlock Grid.Column="1" Text="➔" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
 
                 <StackPanel Grid.Column="2">
                     <Label Content="Đích:" Padding="0,0,0,3"/>
-                    <ComboBox x:Name="CmbTargetLang" Height="26">
-                        <ComboBoxItem Content="Vietnamese" IsSelected="True"/>
-                        <ComboBoxItem Content="English"/>
-                        <ComboBoxItem Content="Japanese"/>
-                    </ComboBox>
+                    <ComboBox Height="26" 
+                              ItemsSource="{Binding TargetLanguages}" 
+                              SelectedItem="{Binding SelectedTargetLanguage}"/>
                 </StackPanel>
             </Grid>
         </GroupBox>
@@ -82,28 +105,32 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <ComboBox x:Name="CmbModifier" Grid.Column="0" Height="26">
-                    <ComboBoxItem Content="Alt" IsSelected="True"/>
-                    <ComboBoxItem Content="Ctrl"/>
-                    <ComboBoxItem Content="Shift"/>
-                    <ComboBoxItem Content="Ctrl + Alt"/>
-                </ComboBox>
+                <ComboBox Grid.Column="0" Height="26" 
+                          ItemsSource="{Binding Modifiers}" 
+                          SelectedItem="{Binding SelectedModifier}"/>
 
                 <TextBlock Grid.Column="1" Text="+" HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
-                <ComboBox x:Name="CmbKey" Grid.Column="2" Height="26">
-                    <ComboBoxItem Content="Q" IsSelected="True"/>
-                    <ComboBoxItem Content="S"/>
-                    <ComboBoxItem Content="T"/>
-                    <ComboBoxItem Content="D"/>
-                    <ComboBoxItem Content="` (Tilde)"/>
-                </ComboBox>
+                <ComboBox Grid.Column="2" Height="26" 
+                          ItemsSource="{Binding Keys}" 
+                          SelectedItem="{Binding SelectedKey}"/>
             </Grid>
         </GroupBox>
 
         <!-- Nút thao tác & Trạng thái -->
         <DockPanel Grid.Row="4" LastChildFill="False">
-            <TextBlock x:Name="TxtStatus" Text="Sẵn sàng" VerticalAlignment="Center" Foreground="#107C41" DockPanel.Dock="Left"/>
+            <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" DockPanel.Dock="Left">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="#107C41"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                <Setter Property="Foreground" Value="#DC2626"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
 
             <Button x:Name="BtnSave" Content="Lưu Cài Đặt" Width="100" Height="28" 
                     DockPanel.Dock="Right" Click="BtnSave_Click"/>

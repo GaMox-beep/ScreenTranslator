@@ -12,27 +12,34 @@ public class SettingsManager
         
     private static readonly string SettingsFile = Path.Combine(SettingsDir, "settings.json");
 
+    public static string? LastError { get; private set; }
+
     public static AppSettings Load()
     {
+        LastError = null;
         try
         {
             if (File.Exists(SettingsFile))
             {
                 var json = File.ReadAllText(SettingsFile);
-                var settings = JsonSerializer.Deserialize<AppSettings>(json);
+                var settings = JsonSerializer.Deserialize<AppSettings>(json, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
                 if (settings != null) return settings;
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Trả về mặc định nếu lỗi đọc file
+            LastError = $"Lỗi đọc file cấu hình: {ex.Message}";
         }
 
         return new AppSettings();
     }
 
-    public static void Save(AppSettings settings)
+    public static bool Save(AppSettings settings)
     {
+        LastError = null;
         try
         {
             if (!Directory.Exists(SettingsDir))
@@ -43,10 +50,12 @@ public class SettingsManager
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(settings, options);
             File.WriteAllText(SettingsFile, json);
+            return true;
         }
-        catch
+        catch (Exception ex)
         {
-            // Ghi file thất bại
+            LastError = $"Lỗi lưu file cấu hình: {ex.Message}";
+            return false;
         }
     }
 }

@@ -1,0 +1,67 @@
+[
+  {
+    "Id": "openrouter",
+    "Name": "OpenRouter",
+    "BaseUrl": "https://openrouter.ai/api/v1/",
+    "RequiresCustomUrl": false,
+    "Models": [
+      "google/gemini-2.0-flash-001",
+      "google/gemini-2.0-flash-exp:free",
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "deepseek/deepseek-chat",
+      "openai/gpt-4o-mini",
+      "anthropic/claude-3.5-haiku"
+    ]
+  },
+  {
+    "Id": "gemini",
+    "Name": "Google Gemini",
+    "BaseUrl": "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "RequiresCustomUrl": false,
+    "Models": [
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+      "gemini-1.5-pro"
+    ]
+  },
+  {
+    "Id": "openai",
+    "Name": "OpenAI",
+    "BaseUrl": "https://api.openai.com/v1/",
+    "RequiresCustomUrl": false,
+    "Models": [
+      "gpt-4o-mini",
+      "gpt-4o"
+    ]
+  },
+  {
+    "Id": "groq",
+    "Name": "Groq",
+    "BaseUrl": "https://api.groq.com/openai/v1/",
+    "RequiresCustomUrl": false,
+    "Models": [
+      "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant"
+    ]
+  },
+  {
+    "Id": "deepseek",
+    "Name": "DeepSeek",
+    "BaseUrl": "https://api.deepseek.com/v1/",
+    "RequiresCustomUrl": false,
+    "Models": [
+      "deepseek-chat",
+      "deepseek-reasoner"
+    ]
+  },
+  {
+    "Id": "custom",
+    "Name": "Tùy chỉnh (Local / OpenAI-compatible)",
+    "BaseUrl": "http://localhost:11434/v1/",
+    "RequiresCustomUrl": true,
+    "Models": [
+      "llama3",
+      "qwen2.5"
+    ]
+  }
+]
