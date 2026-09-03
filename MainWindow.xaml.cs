@@ -8,8 +8,7 @@ namespace ScreenTranslator;
 
 public partial class MainWindow : Window
 {
-    private bool _isKeyVisible = false;
-    private AppSettings _currentSettings;
+    private readonly AppSettings _currentSettings;
 
     public MainWindow()
     {
@@ -21,7 +20,6 @@ public partial class MainWindow : Window
     private void LoadSettingsToUi()
     {
         TxtApiKey.Password = _currentSettings.ApiKey;
-        TxtApiKeyPlain.Text = _currentSettings.ApiKey;
         CmbModel.Text = _currentSettings.Model;
 
         SetComboValue(CmbSourceLang, _currentSettings.SourceLanguage);
@@ -52,29 +50,9 @@ public partial class MainWindow : Window
         return comboBox.Text;
     }
 
-    private void BtnToggleKey_Click(object sender, RoutedEventArgs e)
-    {
-        _isKeyVisible = !_isKeyVisible;
-        if (_isKeyVisible)
-        {
-            TxtApiKeyPlain.Text = TxtApiKey.Password;
-            TxtApiKey.Visibility = Visibility.Collapsed;
-            TxtApiKeyPlain.Visibility = Visibility.Visible;
-            BtnToggleKey.Content = "🔒";
-        }
-        else
-        {
-            TxtApiKey.Password = TxtApiKeyPlain.Text;
-            TxtApiKeyPlain.Visibility = Visibility.Collapsed;
-            TxtApiKey.Visibility = Visibility.Visible;
-            BtnToggleKey.Content = "👁";
-        }
-    }
-
     private void BtnSave_Click(object sender, RoutedEventArgs e)
     {
-        var key = _isKeyVisible ? TxtApiKeyPlain.Text : TxtApiKey.Password;
-        _currentSettings.ApiKey = key.Trim();
+        _currentSettings.ApiKey = TxtApiKey.Password.Trim();
         _currentSettings.Model = string.IsNullOrWhiteSpace(CmbModel.Text) ? "google/gemini-2.0-flash-001" : CmbModel.Text.Trim();
         _currentSettings.SourceLanguage = GetComboValue(CmbSourceLang);
         _currentSettings.TargetLanguage = GetComboValue(CmbTargetLang);
@@ -83,13 +61,13 @@ public partial class MainWindow : Window
 
         SettingsManager.Save(_currentSettings);
 
-        TxtStatus.Text = "✅ Đã lưu cấu hình thành công!";
-        TxtStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#10B981"));
+        TxtStatus.Text = "Đã lưu cài đặt!";
+        TxtStatus.Foreground = Brushes.Green;
     }
 
     private void BtnTestCapture_Click(object sender, RoutedEventArgs e)
     {
-        TxtStatus.Text = "ℹ️ Chức năng quét vùng đang được phát triển...";
-        TxtStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#38BDF8"));
+        TxtStatus.Text = "Chức năng quét đang hoàn thiện...";
+        TxtStatus.Foreground = Brushes.DodgerBlue;
     }
 }
