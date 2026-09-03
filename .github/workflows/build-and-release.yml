@@ -27,7 +27,7 @@ jobs:
 
     - name: Publish Single-File Exe
       run: |
-        dotnet publish ScreenTranslator.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o ./publish
+        dotnet publish ScreenTranslator.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o ./publish
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
@@ -42,8 +42,8 @@ jobs:
         tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
         name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'Latest Build (Continuous)' }}
         body: |
-          Bản build tự động mới nhất của ScreenTranslator (Single-file .exe).
-          - Tải file **ScreenTranslator.exe** bên dưới để chạy trực tiếp (không cần cài thêm .NET).
+          Bản build tự động mới nhất của ScreenTranslator (Single-file .exe siêu nhẹ).
+          - Yêu cầu: Đã cài sẵn .NET 10 Desktop Runtime trên Windows.
           - Commit: ${{ github.sha }}
         files: ./publish/ScreenTranslator.exe
         generate_release_notes: true

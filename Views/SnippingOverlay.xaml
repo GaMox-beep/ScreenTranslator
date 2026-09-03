@@ -1,8 +1,32 @@
 <Window x:Class="ScreenTranslator.Views.SnippingOverlay"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SnippingOverlay" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
-        Topmost="True" ShowInTaskbar="False">
-    <Grid>
-    </Grid>
+        Title="Screen Snipping" 
+        WindowStyle="None" 
+        AllowsTransparency="True" 
+        Background="Transparent"
+        Topmost="True" 
+        ShowInTaskbar="False"
+        Cursor="Cross"
+        MouseDown="Window_MouseDown"
+        MouseMove="Window_MouseMove"
+        MouseUp="Window_MouseUp"
+        KeyDown="Window_KeyDown">
+
+    <Canvas x:Name="OverlayCanvas" Background="#33000000">
+        <!-- Khung hướng dẫn ở giữa phía trên màn hình -->
+        <Border x:Name="InstructionBadge" Canvas.Top="30"
+                Background="#E61E293B" CornerRadius="8" Padding="14,8"
+                BorderBrush="#475569" BorderThickness="1">
+            <TextBlock Text="🖱️ Kéo chuột để chọn vùng cần dịch  •  Nhấn ESC hoặc chuột phải để hủy"
+                       Foreground="#F8FAFC" FontSize="13" FontWeight="SemiBold"/>
+        </Border>
+
+        <!-- Khung chữ nhật hiển thị vùng được chọn -->
+        <Rectangle x:Name="SelectionBox"
+                   Stroke="#3B82F6"
+                   StrokeThickness="2"
+                   Fill="#263B82F6"
+                   Visibility="Collapsed"/>
+    </Canvas>
 </Window>

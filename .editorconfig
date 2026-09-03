@@ -1,0 +1,44 @@
+root = true
+
+# Tất cả các file
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# Các file JSON / YAML
+[*.{json,yml,yaml}]
+indent_size = 2
+
+# Quy tắc cho mã nguồn C# (Tương tự ESLint)
+[*.cs]
+
+# 1. Định dạng & Namespace hiện đại (File-scoped namespace)
+csharp_style_namespace_declarations = file_scoped:warning
+
+# 2. Xóa bỏ import / using thừa
+dotnet_diagnostic.IDE0005.severity = warning
+
+# 3. Phát hiện biến, hàm không sử dụng (Dead code)
+dotnet_diagnostic.IDE0051.severity = warning
+dotnet_diagnostic.IDE0052.severity = warning
+
+# 4. Phát hiện tham số hàm không dùng
+dotnet_diagnostic.IDE0060.severity = warning
+
+# 5. Quy tắc đặt tên (Naming Conventions)
+# Interface phải bắt đầu bằng chữ 'I' (ví dụ IOcrEngine, ITranslator)
+dotnet_naming_rule.interface_should_be_prefixed_with_i.symbols = interface_symbols
+dotnet_naming_rule.interface_should_be_prefixed_with_i.style = interface_style
+dotnet_naming_rule.interface_should_be_prefixed_with_i.severity = warning
+
+dotnet_naming_symbols.interface_symbols.applicable_kinds = interface
+dotnet_naming_style.interface_style.required_prefix = I
+dotnet_naming_style.interface_style.capitalization = pascal_case
+
+# 6. Quy tắc Code Analysis (Microsoft .NET Analyzers)
+# Cho phép thuộc tính instance trong ViewModel phục vụ WPF DataBinding
+dotnet_diagnostic.CA1822.severity = none
+
