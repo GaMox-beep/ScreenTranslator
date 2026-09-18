@@ -5,7 +5,7 @@ using System.Windows.Interop;
 
 namespace ScreenTranslator.Services.Hotkey;
 
-public class GlobalHotkeyManager
+public class GlobalHotkeyManager : IDisposable
 {
     private const int HotkeyId = 9000;
     private const int WmHotkey = 0x0312;
@@ -31,22 +31,22 @@ public class GlobalHotkeyManager
     {
         Unregister();
 
+        var vk = ParseVirtualKey(keyStr);
+        if (vk == 0) return false;
+
         _windowHandle = new WindowInteropHelper(window).Handle;
-        if (_windowHandle == IntPtr.Zero)
-        {
-            // Nếu Window chưa nạp handle, đợi Loaded
-            return false;
-        }
+        if (_windowHandle == IntPtr.Zero) return false;
 
         _hwndSource = HwndSource.FromHwnd(_windowHandle);
         _hwndSource?.AddHook(HwndHook);
 
         var modifier = ParseModifier(modifierStr);
-        var vk = ParseVirtualKey(keyStr);
-
-        if (vk == 0) return false;
-
         _isRegistered = RegisterHotKey(_windowHandle, HotkeyId, modifier | ModNoRepeat, vk);
+        if (!_isRegistered)
+        {
+            Unregister();
+        }
+
         return _isRegistered;
     }
 
@@ -63,6 +63,12 @@ public class GlobalHotkeyManager
             _hwndSource.RemoveHook(HwndHook);
             _hwndSource = null;
         }
+    }
+
+    public void Dispose()
+    {
+        Unregister();
+        GC.SuppressFinalize(this);
     }
 
     private IntPtr HwndHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
