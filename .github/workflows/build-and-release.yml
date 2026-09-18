@@ -18,6 +18,8 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
@@ -25,9 +27,38 @@ jobs:
         dotnet-version: '10.0.x'
         include-prerelease: true
 
+    - name: Run Tests
+      run: dotnet test ScreenTranslator.Tests/ScreenTranslator.Tests.csproj -c Release --verbosity normal
+
+    - name: Set Release Version and Timestamps
+      id: vars
+      shell: pwsh
+      run: |
+        $nowUtc = [DateTime]::UtcNow
+        $nowVn = $nowUtc.AddHours(7)
+        $timeVn = "$($nowVn.ToString('yyyy-MM-dd HH:mm')) (GMT+7)"
+        $timeUtc = "$($nowUtc.ToString('yyyy-MM-dd HH:mm')) UTC"
+        
+        if ($env:GITHUB_REF -like 'refs/tags/v*') {
+          $rawVer = $env:GITHUB_REF_NAME.TrimStart('v')
+          $versionTag = $env:GITHUB_REF_NAME
+          $relName = "Release $env:GITHUB_REF_NAME ($timeVn)"
+          $assemblyVer = $rawVer
+        } else {
+          $versionTag = "v1.0.$env:GITHUB_RUN_NUMBER"
+          $relName = "Release v1.0.$env:GITHUB_RUN_NUMBER ($timeVn)"
+          $assemblyVer = "1.0.$env:GITHUB_RUN_NUMBER"
+        }
+        
+        "VERSION_TAG=$versionTag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "RELEASE_NAME=$relName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "BUILD_TIME_VN=$timeVn" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "BUILD_TIME_UTC=$timeUtc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "ASSEMBLY_VERSION=$assemblyVer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
     - name: Publish Single-File Exe
       run: |
-        dotnet publish ScreenTranslator.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o ./publish
+        dotnet publish ScreenTranslator.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:Version=${{ env.ASSEMBLY_VERSION }} -p:FileVersion=${{ env.ASSEMBLY_VERSION }}.0 -o ./publish
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
@@ -35,16 +66,19 @@ jobs:
         name: ScreenTranslator-win-x64
         path: ./publish/ScreenTranslator.exe
 
-    - name: Create or Update GitHub Release
+    - name: Create GitHub Release
       if: (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')) || startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
-        name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'Latest Build (Continuous)' }}
+        tag_name: ${{ env.VERSION_TAG }}
+        name: ${{ env.RELEASE_NAME }}
+        make_latest: "true"
         body: |
-          Bản build tự động mới nhất của ScreenTranslator (Single-file .exe siêu nhẹ).
-          - Yêu cầu: Đã cài sẵn .NET 10 Desktop Runtime trên Windows.
-          - Commit: ${{ github.sha }}
+          ### ScreenTranslator ${{ env.VERSION_TAG }}
+          - 📅 **Ngày cập nhật:** ${{ env.BUILD_TIME_VN }} / ${{ env.BUILD_TIME_UTC }}
+          - 🚀 **Bản build:** Single-file `.exe` siêu nhẹ, chạy trực tiếp không cần cài đặt.
+          - 📌 **Commit:** ${{ github.sha }}
+          - 💻 **Yêu cầu:** Đã cài sẵn [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) trên Windows.
         files: ./publish/ScreenTranslator.exe
         generate_release_notes: true
       env:
