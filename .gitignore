@@ -1,5 +1,7 @@
 [Bb]in/
 [Oo]bj/
+[Bb]in_*/
+[Oo]bj_*/
 *.user
 *.suo
 .vs/

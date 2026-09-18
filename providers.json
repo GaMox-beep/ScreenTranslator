@@ -56,8 +56,8 @@
   },
   {
     "Id": "custom",
-    "Name": "Tùy chỉnh (Local / OpenAI-compatible)",
-    "BaseUrl": "http://localhost:11434/v1/",
+    "Name": "Custom",
+    "BaseUrl": "",
     "RequiresCustomUrl": true,
     "Models": [
       "llama3",

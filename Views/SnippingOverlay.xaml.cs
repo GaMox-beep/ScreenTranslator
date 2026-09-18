@@ -105,13 +105,13 @@ public partial class SnippingOverlay : Window
         var width = Math.Abs(currentPoint.X - _startPoint.X);
         var height = Math.Abs(currentPoint.Y - _startPoint.Y);
 
+        var dpi = VisualTreeHelper.GetDpi(this);
         Close();
 
         // Chỉ xử lý nếu vùng quét đủ lớn (lớn hơn 10x10 pixel để tránh click nhầm)
         if (width > 10 && height > 10)
         {
             var absoluteRect = new Rect(x + Left, y + Top, width, height);
-            var dpi = VisualTreeHelper.GetDpi(this);
             AreaSelected?.Invoke(absoluteRect, dpi.DpiScaleX, dpi.DpiScaleY);
         }
     }

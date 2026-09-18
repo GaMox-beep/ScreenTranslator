@@ -5,7 +5,7 @@ using System.Windows.Interop;
 
 namespace ScreenTranslator.Services.Hotkey;
 
-public class GlobalHotkeyManager
+public class GlobalHotkeyManager : IDisposable
 {
     private const int HotkeyId = 9000;
     private const int WmHotkey = 0x0312;
@@ -63,6 +63,12 @@ public class GlobalHotkeyManager
             _hwndSource.RemoveHook(HwndHook);
             _hwndSource = null;
         }
+    }
+
+    public void Dispose()
+    {
+        Unregister();
+        GC.SuppressFinalize(this);
     }
 
     private IntPtr HwndHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
