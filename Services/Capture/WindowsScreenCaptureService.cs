@@ -6,12 +6,12 @@ namespace ScreenTranslator.Services.Capture;
 
 public class WindowsScreenCaptureService : IScreenCaptureService
 {
-    public Bitmap CaptureRegion(Rect area, double dpiScaleX = 1.0, double dpiScaleY = 1.0)
+    public Bitmap CaptureRegion(Rect pixelArea)
     {
-        var physicalX = (int)Math.Round(area.X * dpiScaleX);
-        var physicalY = (int)Math.Round(area.Y * dpiScaleY);
-        var physicalWidth = (int)Math.Round(area.Width * dpiScaleX);
-        var physicalHeight = (int)Math.Round(area.Height * dpiScaleY);
+        var physicalX = checked((int)Math.Round(pixelArea.Left));
+        var physicalY = checked((int)Math.Round(pixelArea.Top));
+        var physicalWidth = checked((int)Math.Round(pixelArea.Right) - physicalX);
+        var physicalHeight = checked((int)Math.Round(pixelArea.Bottom) - physicalY);
 
         if (physicalWidth <= 0 || physicalHeight <= 0)
         {
@@ -19,15 +19,20 @@ public class WindowsScreenCaptureService : IScreenCaptureService
         }
 
         var bitmap = new Bitmap(physicalWidth, physicalHeight, PixelFormat.Format32bppArgb);
-        using (var graphics = Graphics.FromImage(bitmap))
+        try
         {
+            using var graphics = Graphics.FromImage(bitmap);
             graphics.CopyFromScreen(
                 physicalX, physicalY,
                 0, 0,
                 new System.Drawing.Size(physicalWidth, physicalHeight),
                 CopyPixelOperation.SourceCopy);
+            return bitmap;
         }
-
-        return bitmap;
+        catch
+        {
+            bitmap.Dispose();
+            throw;
+        }
     }
 }

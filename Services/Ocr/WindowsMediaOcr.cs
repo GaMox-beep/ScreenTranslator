@@ -11,14 +11,16 @@ namespace ScreenTranslator.Services.Ocr;
 
 public class WindowsMediaOcr : IOcrEngine
 {
-    private static readonly ConcurrentDictionary<string, OcrEngine?> EngineCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, OcrEngine> EngineCache = new(StringComparer.OrdinalIgnoreCase);
 
-    public async Task<string> RecognizeTextAsync(Bitmap bitmap, string languageCode = "Auto Detect")
+    public async Task<string> RecognizeTextAsync(Bitmap bitmap, string languageCode = "Windows Default", CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(bitmap);
+        cancellationToken.ThrowIfCancellationRequested();
+        var engine = EngineCache.GetOrAdd(languageCode, CreateEngine);
 
-        // 1. Tiền xử lý ảnh siêu tốc (chỉ phóng to khi chữ nhỏ + tăng tương phản lọc nhiễu nền, 1-3ms)
-        using var preprocessed = PreprocessBitmap(bitmap);
+        // Preprocess on a worker so large selections do not block the WPF dispatcher.
+        using var preprocessed = await Task.Run(() => PreprocessBitmap(bitmap, cancellationToken), cancellationToken);
 
         // 2. Chuyển đổi Bitmap sang SoftwareBitmap trong RAM qua MemoryStream
         using var memoryStream = new MemoryStream();
@@ -26,20 +28,14 @@ public class WindowsMediaOcr : IOcrEngine
         memoryStream.Position = 0;
 
         using var randomAccessStream = memoryStream.AsRandomAccessStream();
-        var decoder = await BitmapDecoder.CreateAsync(randomAccessStream);
+        var decoder = await BitmapDecoder.CreateAsync(randomAccessStream).AsTask(cancellationToken);
         using var softwareBitmap = await decoder.GetSoftwareBitmapAsync(
-            BitmapPixelFormat.Bgra8, 
-            BitmapAlphaMode.Premultiplied);
-
-        // 2. Lấy OcrEngine từ cache (tránh tải lại từ điển hệ thống mỗi lần quét)
-        var engine = EngineCache.GetOrAdd(languageCode, CreateEngine);
-        if (engine == null)
-        {
-            throw new InvalidOperationException("Hệ điều hành Windows hiện chưa cài gói ngôn ngữ OCR phù hợp.");
-        }
+            BitmapPixelFormat.Bgra8,
+            BitmapAlphaMode.Premultiplied).AsTask(cancellationToken);
 
         // 3. Thực hiện nhận diện chữ
-        var ocrResult = await engine.RecognizeAsync(softwareBitmap);
+        var ocrResult = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         if (ocrResult == null || ocrResult.Lines.Count == 0)
         {
             return string.Empty;
@@ -50,10 +46,10 @@ public class WindowsMediaOcr : IOcrEngine
         return string.Join(Environment.NewLine, lines).Trim();
     }
 
-    private static OcrEngine? CreateEngine(string language)
+    private static OcrEngine CreateEngine(string language)
     {
         var tag = MapLanguageToTag(language);
-        if (!string.IsNullOrEmpty(tag))
+        if (tag != null)
         {
             var targetLang = new Language(tag);
             if (OcrEngine.IsLanguageSupported(targetLang))
@@ -61,9 +57,10 @@ public class WindowsMediaOcr : IOcrEngine
                 var targetEngine = OcrEngine.TryCreateFromLanguage(targetLang);
                 if (targetEngine != null) return targetEngine;
             }
+            throw new InvalidOperationException($"Windows chưa cài OCR cho {language}. Vui lòng cài gói ngôn ngữ tương ứng trong Windows Settings.");
         }
 
-        // Dự phòng 1: Dùng ngôn ngữ mặc định của người dùng Windows
+        // Windows Default uses the first supported language in the Windows user profile.
         var userEngine = OcrEngine.TryCreateFromUserProfileLanguages();
         if (userEngine != null) return userEngine;
 
@@ -71,10 +68,11 @@ public class WindowsMediaOcr : IOcrEngine
         var available = OcrEngine.AvailableRecognizerLanguages;
         if (available != null && available.Count > 0)
         {
-            return OcrEngine.TryCreateFromLanguage(available[0]);
+            var fallbackEngine = OcrEngine.TryCreateFromLanguage(available[0]);
+            if (fallbackEngine != null) return fallbackEngine;
         }
 
-        return null;
+        throw new InvalidOperationException("Hệ điều hành Windows hiện chưa cài gói ngôn ngữ OCR phù hợp.");
     }
 
     private static string? MapLanguageToTag(string language) => language switch
@@ -87,12 +85,13 @@ public class WindowsMediaOcr : IOcrEngine
         "German" => "de-DE",
         "Spanish" => "es-ES",
         "Russian" => "ru-RU",
-        _ => "en-US"
+        "Windows Default" or "Auto Detect" => null,
+        _ => throw new ArgumentException($"Ngôn ngữ OCR không được hỗ trợ: {language}", nameof(language))
     };
 
-    private static Bitmap PreprocessBitmap(Bitmap source)
+    private static Bitmap PreprocessBitmap(Bitmap source, CancellationToken cancellationToken)
     {
-        // 1. Chỉ phóng to khi ảnh chụp có chiều cao nhỏ (chữ nhỏ < 260px) để tối ưu triệt để CPU/RAM
+        // Upscale short selections to improve recognition of small text.
         double scale = 1.0;
         if (source.Height < 140)
         {
@@ -103,62 +102,66 @@ public class WindowsMediaOcr : IOcrEngine
             scale = 1.5;
         }
 
-        int targetWidth = (int)Math.Round(source.Width * scale);
-        int targetHeight = (int)Math.Round(source.Height * scale);
-
-        // Giới hạn chiều rộng tối đa an toàn cho RAM và Windows OCR
-        if (targetWidth > 6000)
-        {
-            targetWidth = 6000;
-            targetHeight = Math.Max(1, (int)Math.Round((double)source.Height * 6000 / source.Width));
-        }
+        // WinRT limits both dimensions, including after upscaling small text.
+        var maxDimension = (int)OcrEngine.MaxImageDimension;
+        scale = Math.Min(scale, (double)maxDimension / Math.Max(source.Width, source.Height));
+        int targetWidth = Math.Clamp((int)Math.Round(source.Width * scale), 1, maxDimension);
+        int targetHeight = Math.Clamp((int)Math.Round(source.Height * scale), 1, maxDimension);
 
         var scaled = new Bitmap(targetWidth, targetHeight, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(scaled))
-        {
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.SmoothingMode = SmoothingMode.HighQuality;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            g.DrawImage(source, 0, 0, targetWidth, targetHeight);
-        }
-
-        // 2. Tăng tương phản phi tuyến bằng LockBits siêu tốc (1-2 ms, 0 cấp phát bộ nhớ heap)
-        var rect = new Rectangle(0, 0, targetWidth, targetHeight);
-        var bmpData = scaled.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
-
         try
         {
-            unsafe
+            using (var g = Graphics.FromImage(scaled))
             {
-                byte* ptr = (byte*)bmpData.Scan0;
-                int totalPixels = targetWidth * targetHeight;
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.SmoothingMode = SmoothingMode.HighQuality;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.DrawImage(source, 0, 0, targetWidth, targetHeight);
+            }
 
-                for (int i = 0; i < totalPixels; i++)
+            // Boost contrast in place, respecting the bitmap's row stride.
+            var rect = new Rectangle(0, 0, targetWidth, targetHeight);
+            var bmpData = scaled.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+
+            try
+            {
+                unsafe
                 {
-                    byte b = ptr[0];
-                    byte g = ptr[1];
-                    byte r = ptr[2];
+                    for (int y = 0; y < targetHeight; y++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        byte* ptr = (byte*)bmpData.Scan0 + y * bmpData.Stride;
+                        for (int x = 0; x < targetWidth; x++)
+                        {
+                            byte b = ptr[0];
+                            byte g = ptr[1];
+                            byte r = ptr[2];
 
-                    // Luminance: 0.299R + 0.587G + 0.114B
-                    int gray = (r * 77 + g * 150 + b * 29) >> 8;
+                            // Luminance: 0.299R + 0.587G + 0.114B
+                            int gray = (r * 77 + g * 150 + b * 29) >> 8;
 
-                    // Tách chữ sáng khỏi viền/nền chuyển màu và làm đậm nét chữ
-                    byte enhanced = (byte)(gray > 140 ? Math.Min(255, (gray * 13) / 10) : (gray * 7) / 10);
+                            byte enhanced = (byte)(gray > 140 ? Math.Min(255, (gray * 13) / 10) : (gray * 7) / 10);
 
-                    ptr[0] = enhanced;
-                    ptr[1] = enhanced;
-                    ptr[2] = enhanced;
+                            ptr[0] = enhanced;
+                            ptr[1] = enhanced;
+                            ptr[2] = enhanced;
 
-                    ptr += 4;
+                            ptr += 4;
+                        }
+                    }
                 }
             }
+            finally
+            {
+                scaled.UnlockBits(bmpData);
+            }
+            return scaled;
         }
-        finally
+        catch
         {
-            scaled.UnlockBits(bmpData);
+            scaled.Dispose();
+            throw;
         }
-
-        return scaled;
     }
 }
 

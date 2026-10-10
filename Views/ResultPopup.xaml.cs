@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using ScreenTranslator.Services.Capture;
 using ScreenTranslator.ViewModels;
 
 namespace ScreenTranslator.Views;
@@ -43,17 +44,7 @@ public partial class ResultPopup : Window
         _currentPopup = popup;
         popup.ViewModel.SetLoading("Đang dịch...");
 
-        // Định vị popup gần vị trí con trỏ chuột, cách một khoảng nhẹ
-        var targetX = screenPosition.X + 10;
-        var targetY = screenPosition.Y + 15;
-
-        // Giới hạn trong vùng màn hình
-        var maxRight = SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth - 780;
-        var maxBottom = SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - 580;
-
-        popup.Left = Math.Max(SystemParameters.VirtualScreenLeft + 10, Math.Min(targetX, maxRight));
-        popup.Top = Math.Max(SystemParameters.VirtualScreenTop + 10, Math.Min(targetY, maxBottom));
-
+        popup.Loaded += (_, _) => ScreenCoordinates.PlaceNear(popup, screenPosition);
         popup.Show();
         popup.Activate();
         return popup;

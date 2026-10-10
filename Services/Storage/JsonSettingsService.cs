@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Text.Json;
 using ScreenTranslator.Models;
@@ -8,6 +9,8 @@ public class JsonSettingsService : ISettingsService
 {
     private readonly string _settingsDir;
     private readonly string _settingsFile;
+    private readonly Lock _fileLock;
+    private static readonly ConcurrentDictionary<string, Lock> FileLocks = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly JsonSerializerOptions ReadOptions = new()
     {
@@ -23,67 +26,112 @@ public class JsonSettingsService : ISettingsService
 
     public JsonSettingsService(string? customSettingsDir = null)
     {
-        _settingsDir = customSettingsDir ?? Path.Combine(
+        _settingsDir = Path.GetFullPath(customSettingsDir ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "ScreenTranslator");
+            "ScreenTranslator"));
         _settingsFile = Path.Combine(_settingsDir, "settings.json");
+        _fileLock = FileLocks.GetOrAdd(_settingsFile, _ => new Lock());
     }
 
     public AppSettings Load()
     {
-        LastError = null;
-        try
+        lock (_fileLock)
         {
-            if (File.Exists(_settingsFile))
+            LastError = null;
+            try
             {
-                var json = File.ReadAllText(_settingsFile);
-                var settings = JsonSerializer.Deserialize<AppSettings>(json, ReadOptions);
-                if (settings != null) return settings;
+                return ReadSettings();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                LastError = $"Lỗi đọc file cấu hình: {ex.Message}";
+                return new AppSettings();
             }
         }
-        catch (Exception ex)
-        {
-            LastError = $"Lỗi đọc file cấu hình: {ex.Message}";
-        }
-
-        return new AppSettings();
     }
 
     public bool Save(AppSettings settings)
     {
-        LastError = null;
-        try
+        ArgumentNullException.ThrowIfNull(settings);
+        lock (_fileLock)
         {
-            if (!Directory.Exists(_settingsDir))
+            LastError = null;
+            try
             {
-                Directory.CreateDirectory(_settingsDir);
+                // Model is maintained by the translator; the settings window may hold an older snapshot.
+                var currentModel = settings.LastWorkingModel;
+                if (File.Exists(_settingsFile))
+                {
+                    try
+                    {
+                        currentModel = ReadSettings().LastWorkingModel;
+                    }
+                    catch (JsonException)
+                    {
+                        // An explicit preferences save can repair a corrupt file.
+                        currentModel = string.Empty;
+                    }
+                }
+                var merged = new AppSettings
+                {
+                    ApiKey = settings.ApiKey,
+                    SourceLanguage = settings.SourceLanguage,
+                    TargetLanguage = settings.TargetLanguage,
+                    HotkeyModifier = settings.HotkeyModifier,
+                    HotkeyKey = settings.HotkeyKey,
+                    LastWorkingModel = currentModel
+                };
+                WriteSettings(merged);
+                return true;
             }
-
-            var json = JsonSerializer.Serialize(settings, WriteOptions);
-            File.WriteAllText(_settingsFile, json);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LastError = $"Lỗi lưu file cấu hình: {ex.Message}";
-            return false;
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                LastError = $"Lỗi lưu file cấu hình: {ex.Message}";
+                return false;
+            }
         }
     }
 
     public void SaveLastWorkingModel(string model)
     {
-        try
+        lock (_fileLock)
         {
-            var settings = Load();
-            if (settings.LastWorkingModel != model)
+            LastError = null;
+            try
             {
-                settings.LastWorkingModel = model;
-                Save(settings);
+                var settings = ReadSettings();
+                if (settings.LastWorkingModel != model)
+                {
+                    settings.LastWorkingModel = model;
+                    WriteSettings(settings);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                LastError = $"Lỗi lưu model: {ex.Message}";
             }
         }
-        catch
+    }
+
+    private AppSettings ReadSettings()
+    {
+        if (!File.Exists(_settingsFile)) return new AppSettings();
+        return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_settingsFile), ReadOptions)
+            ?? throw new JsonException("File cấu hình không chứa dữ liệu hợp lệ.");
+    }
+
+    private void WriteSettings(AppSettings settings)
+    {
+        Directory.CreateDirectory(_settingsDir);
+        var temporaryFile = Path.Combine(_settingsDir, $"settings.{Guid.NewGuid():N}.tmp");
+        try
         {
-            // Bỏ qua lỗi phụ nếu không ghi được model
+            File.WriteAllText(temporaryFile, JsonSerializer.Serialize(settings, WriteOptions));
+            File.Move(temporaryFile, _settingsFile, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryFile)) File.Delete(temporaryFile);
         }
     }
 }

@@ -22,7 +22,6 @@ public class OrchestratorTests
         // Arrange
         var request = new TranslationPipelineRequest(
             new Rect(10, 20, 300, 200),
-            1.25, 1.25,
             "English", "Vietnamese",
             "fake-api-key");
 
@@ -65,7 +64,6 @@ public class OrchestratorTests
         // Arrange
         var request = new TranslationPipelineRequest(
             new Rect(0, 0, 100, 100),
-            1.0, 1.0,
             "English", "Vietnamese",
             "fake-api-key");
 
@@ -97,7 +95,6 @@ public class OrchestratorTests
         // Arrange
         var request = new TranslationPipelineRequest(
             new Rect(0, 0, 100, 100),
-            1.0, 1.0,
             "English", "Vietnamese",
             ""); // Empty API Key
 
@@ -126,7 +123,6 @@ public class OrchestratorTests
         using var cts = new CancellationTokenSource();
         var request = new TranslationPipelineRequest(
             new Rect(0, 0, 100, 100),
-            1.0, 1.0,
             "English", "Vietnamese",
             "fake-key");
 
@@ -145,6 +141,33 @@ public class OrchestratorTests
 
         // Assert: Không ném uncaught exception làm sập ứng dụng
         Assert.Null(exception);
+        Assert.Equal(0, _captureService.CaptureCallCount);
+        Assert.Equal(0, _ocrEngine.RecognizeCallCount);
+        Assert.Equal(0, _translator.TranslateCallCount);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_WhenTranslatorReturnsAfterCancellation_DoesNotPublishStaleResult()
+    {
+        using var cts = new CancellationTokenSource();
+        var request = new TranslationPipelineRequest(new Rect(-300, 20, 200, 100), "English", "Vietnamese", "test-key");
+        _translator.BeforeReturn = cts.Cancel;
+        var published = false;
+        var errorPublished = false;
+        string? status = null;
+        var callbacks = new TranslationPipelineCallbacks(
+            OnLoading: () => { },
+            OnSuccess: _ => published = true,
+            OnError: _ => errorPublished = true,
+            OnStatusChanged: (text, _) => status = text);
+
+        await _sut.ProcessAsync(request, callbacks, cts.Token);
+
+        Assert.False(published);
+        Assert.False(errorPublished);
+        Assert.Equal("Đang nhận diện chữ...", status);
+        Assert.Equal(cts.Token, _ocrEngine.LastCancellationToken);
+        Assert.Equal(request.PixelArea, _captureService.LastCapturedArea);
     }
 
     [Fact]
@@ -153,7 +176,6 @@ public class OrchestratorTests
         // Arrange
         var request = new TranslationPipelineRequest(
             new Rect(0, 0, 100, 100),
-            1.0, 1.0,
             "English", "Vietnamese",
             "fake-key");
 

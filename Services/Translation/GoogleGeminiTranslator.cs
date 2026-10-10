@@ -9,7 +9,7 @@ using ScreenTranslator.Services.Storage;
 
 namespace ScreenTranslator.Services.Translation;
 
-public class GoogleGeminiTranslator : ITranslator
+public class GoogleGeminiTranslator : ITranslator, IDisposable
 {
     private static readonly Lazy<HttpClient> LazyDefaultHttpClient = new(() => new HttpClient
     {
@@ -27,6 +27,7 @@ public class GoogleGeminiTranslator : ITranslator
 
     private readonly HttpClient _httpClient;
     private readonly ISettingsService _settingsService;
+    private readonly SemaphoreSlim _translationGate = new(1, 1);
 
     // Quản lý thời gian cooldown cho từng model khi bị hết quota (RPM/RPD) hoặc quá tải
     private readonly ConcurrentDictionary<string, DateTime> _modelCooldowns = new(StringComparer.OrdinalIgnoreCase);
@@ -72,29 +73,57 @@ public class GoogleGeminiTranslator : ITranslator
             throw new InvalidOperationException("Chưa cấu hình API Key. Vui lòng nhập API Key Google Gemini trong phần Cài đặt.");
         }
 
-        var trimmedKey = apiKey.Trim();
+        await _translationGate.WaitAsync(cancellationToken);
+        try
+        {
+            var trimmedKey = apiKey.Trim();
+            if (_cachedApiKey != null && _cachedApiKey != trimmedKey)
+            {
+                _activeWorkingModel = null;
+                _cachedDiscoveredModels = null;
+                _modelCooldowns.Clear();
+            }
+            _cachedApiKey = trimmedKey;
+            return await TranslateCoreAsync(text, targetLanguage, trimmedKey, cancellationToken);
+        }
+        finally
+        {
+            _translationGate.Release();
+        }
+    }
+
+    public void Dispose()
+    {
+        _translationGate.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    private async Task<string> TranslateCoreAsync(
+        string text, string targetLanguage, string trimmedKey, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         var now = DateTime.UtcNow;
 
         // BƯỚC 1 (FAST PATH): Nếu đã có model hoạt động tốt từ trước và không bị cooldown, gọi trực tiếp ngay lập tức!
-        if (!string.IsNullOrEmpty(_activeWorkingModel) &&
-            (_cachedApiKey == null || _cachedApiKey == trimmedKey) &&
-            (!_modelCooldowns.TryGetValue(_activeWorkingModel, out var cooldown) || cooldown <= now))
+        var activeModel = _activeWorkingModel;
+        if (!string.IsNullOrEmpty(activeModel) &&
+            (!_modelCooldowns.TryGetValue(activeModel, out var cooldown) || cooldown <= now))
         {
-            _cachedApiKey = trimmedKey;
-            AppLogger.Log($"[GEMINI] Fast-Path engaged: Model=\"{_activeWorkingModel}\"");
+            AppLogger.Log($"[GEMINI] Fast-Path engaged: Model=\"{activeModel}\"");
             var swFast = Stopwatch.StartNew();
             try
             {
-                var result = await CallGeminiAsync(_activeWorkingModel, text, targetLanguage, trimmedKey, cancellationToken);
+                var result = await CallGeminiAsync(activeModel, text, targetLanguage, trimmedKey, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
                 swFast.Stop();
-                AppLogger.Log($"[GEMINI] Fast-Path request succeeded: Model=\"{_activeWorkingModel}\", Latency={swFast.ElapsedMilliseconds}ms, OutputChars={result.Length}");
+                AppLogger.Log($"[GEMINI] Fast-Path request succeeded: Model=\"{activeModel}\", Latency={swFast.ElapsedMilliseconds}ms, OutputChars={result.Length}");
                 return result;
             }
             catch (Exception ex) when (IsQuotaOrUnavailableException(ex, out var duration))
             {
                 swFast.Stop();
-                AppLogger.Log($"[GEMINI] WARN: Fast-Path request failed: Model=\"{_activeWorkingModel}\", Elapsed={swFast.ElapsedMilliseconds}ms, Error=\"{ex.Message}\". Cooldown={duration.TotalSeconds:F0}s.");
-                _modelCooldowns[_activeWorkingModel] = DateTime.UtcNow.Add(duration);
+                AppLogger.Log($"[GEMINI] WARN: Fast-Path request failed: Model=\"{activeModel}\", Elapsed={swFast.ElapsedMilliseconds}ms, Error=\"{ex.Message}\". Cooldown={duration.TotalSeconds:F0}s.");
+                _modelCooldowns[activeModel] = DateTime.UtcNow.Add(duration);
                 _activeWorkingModel = null;
             }
         }
@@ -112,16 +141,14 @@ public class GoogleGeminiTranslator : ITranslator
 
         if (availableModels.Count == 0)
         {
-            AppLogger.Log("[GEMINI] WARN: All candidate models are on cooldown. Retrying models with earliest expiration.");
-            availableModels = allModels
-                .OrderBy(m => _modelCooldowns.TryGetValue(m, out var until) ? until : DateTime.MinValue)
-                .ToList();
+            throw new InvalidOperationException("Tất cả các model Gemini đang tạm nghỉ do hết hạn ngạch hoặc quá tải. Vui lòng thử lại sau.");
         }
 
         Exception? lastException = null;
 
         foreach (var model in availableModels)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             AppLogger.Log($"[GEMINI] Testing candidate model: Model=\"{model}\"...");
             var attemptSw = Stopwatch.StartNew();
 
@@ -131,11 +158,11 @@ public class GoogleGeminiTranslator : ITranslator
                 attemptCts.CancelAfter(TimeSpan.FromSeconds(10));
 
                 var result = await CallGeminiAsync(model, text, targetLanguage, trimmedKey, attemptCts.Token);
+                cancellationToken.ThrowIfCancellationRequested();
                 attemptSw.Stop();
 
                 AppLogger.Log($"[GEMINI] SUCCESS: Model=\"{model}\" responded in {attemptSw.ElapsedMilliseconds} ms (OutputChars={result.Length}). Promoted to active Fast-Path.");
                 _activeWorkingModel = model;
-                _cachedApiKey = trimmedKey;
                 _modelCooldowns.TryRemove(model, out _);
                 _settingsService.SaveLastWorkingModel(model);
                 return result;
@@ -218,7 +245,7 @@ public class GoogleGeminiTranslator : ITranslator
 
         try
         {
-            var listUrl = $"https://generativelanguage.googleapis.com/v1beta/models?key={apiKey}";
+            const string listUrl = "https://generativelanguage.googleapis.com/v1beta/models";
             using var request = new HttpRequestMessage(HttpMethod.Get, listUrl);
             request.Headers.Add("x-goog-api-key", apiKey);
 
@@ -281,11 +308,11 @@ public class GoogleGeminiTranslator : ITranslator
                 throw new InvalidOperationException(errorMsg);
             }
         }
-        catch (InvalidOperationException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or TimeoutException)
         {
             // Bỏ qua lỗi mạng khi list models để fallback sang danh sách mặc định bên dưới
         }
@@ -347,7 +374,7 @@ public class GoogleGeminiTranslator : ITranslator
             ? modelWithPrefix
             : $"models/{modelWithPrefix}";
 
-        var endpoint = $"https://generativelanguage.googleapis.com/v1beta/{normalizedModel}:generateContent?key={apiKey}";
+        var endpoint = $"https://generativelanguage.googleapis.com/v1beta/{normalizedModel}:generateContent";
 
         var prompt = $"Translate the following text into {targetLanguage} accurately and naturally. " +
                      "The text is captured via screen OCR and may contain minor recognition artifacts, fused words, or typos; " +
@@ -445,7 +472,7 @@ public class GoogleGeminiTranslator : ITranslator
         {
             response = await _httpClient.SendAsync(request, cancellationToken);
         }
-        catch (TaskCanceledException)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             throw new TimeoutException("Hết thời gian chờ phản hồi từ Google Gemini (Timeout).");
         }

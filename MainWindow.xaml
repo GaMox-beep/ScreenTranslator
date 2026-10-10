@@ -47,8 +47,9 @@
 
                 <StackPanel Grid.Column="0">
                     <Label Content="Nguồn:" Padding="0,0,0,3"/>
-                    <ComboBox Height="26" 
-                              ItemsSource="{Binding SourceLanguages}" 
+                    <ComboBox Height="26"
+                              ToolTip="Windows Default dùng ngôn ngữ OCR trong hồ sơ Windows. Chọn ngôn ngữ cụ thể nếu cần nhận diện ngôn ngữ khác."
+                              ItemsSource="{Binding SourceLanguages}"
                               SelectedItem="{Binding SelectedSourceLanguage}"/>
                 </StackPanel>
 

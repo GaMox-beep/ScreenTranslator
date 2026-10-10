@@ -39,7 +39,6 @@ public partial class MainWindow : Window
         {
             _hotkeyManager.Dispose();
             _translationCts?.Cancel();
-            _translationCts?.Dispose();
         };
         _hotkeyManager.HotkeyPressed += OnHotkeyPressed;
 
@@ -64,19 +63,18 @@ public partial class MainWindow : Window
     private void OnHotkeyPressed()
     {
         AppLogger.Log("[TRIGGER] Screen snip action initiated by user hotkey.");
-        SnippingOverlay.StartSnipping(async (area, dpiScaleX, dpiScaleY) =>
+        SnippingOverlay.StartSnipping(async area =>
         {
             _translationCts?.Cancel();
-            _translationCts?.Dispose();
-            _translationCts = new CancellationTokenSource();
-            var cancellationToken = _translationCts.Token;
+            using var requestCts = new CancellationTokenSource();
+            _translationCts = requestCts;
+            var cancellationToken = requestCts.Token;
+            bool IsCurrentRequest() => !cancellationToken.IsCancellationRequested && ReferenceEquals(_translationCts, requestCts);
 
             ResultPopup? popup = null;
 
             var request = new TranslationPipelineRequest(
                 area,
-                dpiScaleX,
-                dpiScaleY,
                 ViewModel.SelectedSourceLanguage,
                 ViewModel.SelectedTargetLanguage,
                 ViewModel.ApiKey);
@@ -84,14 +82,23 @@ public partial class MainWindow : Window
             var callbacks = new TranslationPipelineCallbacks(
                 OnLoading: () =>
                 {
+                    if (!IsCurrentRequest()) return;
                     var popupPosition = new Point(area.X, area.Bottom + 6);
                     popup = ResultPopup.ShowLoading(popupPosition);
                 },
-                OnSuccess: text => popup?.UpdateSuccess(text),
-                OnError: err => popup?.UpdateError(err),
-                OnStatusChanged: (status, isError) => ViewModel.SetStatus(status, isError));
+                OnSuccess: text => { if (IsCurrentRequest()) popup?.UpdateSuccess(text); },
+                OnError: err => { if (IsCurrentRequest()) popup?.UpdateError(err); },
+                OnStatusChanged: (status, isError) => { if (IsCurrentRequest()) ViewModel.SetStatus(status, isError); });
 
-            await _orchestrator.ProcessAsync(request, callbacks, cancellationToken);
+            try
+            {
+                await _orchestrator.ProcessAsync(request, callbacks, cancellationToken);
+            }
+            finally
+            {
+                if (cancellationToken.IsCancellationRequested && popup?.IsLoaded == true) popup.Close();
+                if (ReferenceEquals(_translationCts, requestCts)) _translationCts = null;
+            }
         });
     }
 

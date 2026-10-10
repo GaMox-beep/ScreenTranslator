@@ -7,8 +7,8 @@ public static class ScreenCaptureService
 {
     private static readonly WindowsScreenCaptureService Service = new();
 
-    public static Bitmap CaptureRegion(Rect area, double dpiScaleX = 1.0, double dpiScaleY = 1.0)
+    public static Bitmap CaptureRegion(Rect pixelArea)
     {
-        return Service.CaptureRegion(area, dpiScaleX, dpiScaleY);
+        return Service.CaptureRegion(pixelArea);
     }
 }

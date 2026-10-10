@@ -10,6 +10,134 @@ namespace ScreenTranslator.Tests;
 
 public class GeminiTranslatorTests
 {
+    private sealed class AsyncHttpMessageHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => responder(request, cancellationToken);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TranslateAsync_WhenCancelledDuringGeneration_StopsWithoutRotating(bool useFastPath)
+    {
+        var storage = new InMemorySettingsService();
+        if (useFastPath)
+            storage.Save(new AppSettings { LastWorkingModel = "models/test-gemini-flash" });
+
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var generationCalls = 0;
+        var handler = new AsyncHttpMessageHandler(async (request, token) =>
+        {
+            if (request.Method == HttpMethod.Get)
+                return JsonResponse("""{"models":[{"name":"models/test-gemini-flash","supportedGenerationMethods":["generateContent"]}]}""");
+
+            Interlocked.Increment(ref generationCalls);
+            started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return JsonResponse("{}");
+        });
+        using var client = new HttpClient(handler);
+        var translator = new GoogleGeminiTranslator(client, storage);
+        using var cts = new CancellationTokenSource();
+        var translation = translator.TranslateAsync("Hello", "Vietnamese", "English", "test-key", cts.Token);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => translation);
+        Assert.Equal(1, generationCalls);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_WhenApiKeyChanges_DiscoversModelsForNewKey()
+    {
+        var discoveredKeys = new List<string>();
+        var handler = new AsyncHttpMessageHandler((request, _) =>
+        {
+            var key = Assert.Single(request.Headers.GetValues("x-goog-api-key"));
+            Assert.DoesNotContain("key=", request.RequestUri!.Query);
+            if (request.Method == HttpMethod.Get)
+            {
+                discoveredKeys.Add(key);
+                return Task.FromResult(JsonResponse($$"""{"models":[{"name":"models/gemini-{{key}}-flash","supportedGenerationMethods":["generateContent"]}]}"""));
+            }
+            Assert.Contains($"gemini-{key}-flash", request.RequestUri.AbsolutePath);
+            return Task.FromResult(JsonResponse("""{"candidates":[{"content":{"parts":[{"text":"Xin chào"}]}}]}"""));
+        });
+        using var client = new HttpClient(handler);
+        var translator = new GoogleGeminiTranslator(client, new InMemorySettingsService());
+        await translator.TranslateAsync("Hello", "Vietnamese", "English", "first");
+        await translator.TranslateAsync("Hello", "Vietnamese", "English", "second");
+        Assert.Equal(new[] { "first", "second" }, discoveredKeys);
+    }
+
+    private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(json, Encoding.UTF8, "application/json")
+    };
+
+    [Fact]
+    public async Task TranslateAsync_WithConcurrentApiKeys_SerializesGenerationAndKeepsModelsIsolated()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var activeGenerations = 0;
+        var maxActiveGenerations = 0;
+        var handler = new AsyncHttpMessageHandler(async (request, token) =>
+        {
+            var key = Assert.Single(request.Headers.GetValues("x-goog-api-key"));
+            if (request.Method == HttpMethod.Get)
+                return JsonResponse($$"""{"models":[{"name":"models/gemini-{{key}}-flash","supportedGenerationMethods":["generateContent"]}]}""");
+
+            Assert.Contains($"gemini-{key}-flash", request.RequestUri!.AbsolutePath);
+            var active = Interlocked.Increment(ref activeGenerations);
+            maxActiveGenerations = Math.Max(maxActiveGenerations, active);
+            try
+            {
+                if (key == "first")
+                {
+                    firstStarted.TrySetResult();
+                    await releaseFirst.Task.WaitAsync(token);
+                }
+                return JsonResponse("""{"candidates":[{"content":{"parts":[{"text":"Xin chào"}]}}]}""");
+            }
+            finally
+            {
+                Interlocked.Decrement(ref activeGenerations);
+            }
+        });
+        using var client = new HttpClient(handler);
+        var translator = new GoogleGeminiTranslator(client, new InMemorySettingsService());
+        var first = translator.TranslateAsync("Hello", "Vietnamese", "English", "first");
+        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var second = translator.TranslateAsync("Hello", "Vietnamese", "English", "second");
+        releaseFirst.TrySetResult();
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, maxActiveGenerations);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_WhenAllModelsAreOnCooldown_DoesNotSendAnotherGenerationRequest()
+    {
+        var generationCalls = 0;
+        var handler = new AsyncHttpMessageHandler((request, _) =>
+        {
+            if (request.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("""{"models":[{"name":"models/test-gemini-flash","supportedGenerationMethods":["generateContent"]}]}"""));
+            generationCalls++;
+            var response = JsonResponse("""{"error":{"code":429,"message":"Quota exceeded"}}""");
+            response.StatusCode = HttpStatusCode.TooManyRequests;
+            return Task.FromResult(response);
+        });
+        using var client = new HttpClient(handler);
+        var translator = new GoogleGeminiTranslator(client, new InMemorySettingsService());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => translator.TranslateAsync("Hello", "Vietnamese", "English", "test-key"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => translator.TranslateAsync("Hello again", "Vietnamese", "English", "test-key"));
+        Assert.Equal(1, generationCalls);
+    }
+
     private class MockHttpMessageHandler : HttpMessageHandler
     {
         public Func<HttpRequestMessage, HttpResponseMessage> Responder { get; set; } = _ => new HttpResponseMessage(HttpStatusCode.OK);
@@ -68,7 +196,7 @@ public class GeminiTranslatorTests
             }
 
             // Gọi API list models
-            if (uri.Contains("models?key="))
+            if (req.Method == HttpMethod.Get)
             {
                 var discoveryPayload = new
                 {

@@ -27,16 +27,16 @@ sequenceDiagram
     Hotkey->>Main: WM_HOTKEY message (Win32 Hook)
     Main->>Overlay: Kích hoạt SnippingOverlay phủ toàn bộ Virtual Screen
     User->>Overlay: Kéo chuột chọn vùng (Bounding Rect)
-    Overlay->>Main: Trả về Rect (WPF DIP) + DPI Scale (X, Y)
+    Overlay->>Main: Trả về Rect theo pixel vật lý bằng PointToScreen
     
     Note over Main, Orchestrator: Bắt đầu chuỗi xử lý qua Seam ITranslationOrchestrator
     Main->>Orchestrator: ProcessAsync(request, callbacks, cancellationToken)
     
-    Orchestrator->>Capture: CaptureRegion(Rect, DpiScaleX, DpiScaleY)
-    Note over Capture: Tính pixel vật lý: physicalX = rect.X * dpiScaleX<br/>CopyFromScreen (GDI+ BitBlt) trong RAM
+    Orchestrator->>Capture: CaptureRegion(PixelArea)
+    Note over Capture: Dùng trực tiếp tọa độ pixel vật lý, gồm tọa độ âm<br/>CopyFromScreen (GDI+ BitBlt) trong RAM
     Capture-->>Orchestrator: System.Drawing.Bitmap (32bpp)
 
-    Orchestrator->>OCR: RecognizeTextAsync(bitmap, sourceLanguage)
+    Orchestrator->>OCR: RecognizeTextAsync(bitmap, sourceLanguage, cancellationToken)
     Note over OCR: 1. Scale thông minh nếu ảnh nhỏ (< 140px: 2x)<br/>2. Con trỏ Unsafe LockBits tăng độ tương phản<br/>3. WinRT SoftwareBitmap -> OcrEngine.RecognizeAsync
     OCR-->>Orchestrator: Chuỗi nhận diện được
 
@@ -67,8 +67,10 @@ Khi viết vào CV (phần Projects / Technical Experience), hãy sử dụng c�
 * **Xử lý Hình ảnh & OCR Cấp độ Thấp (Low-level Imaging):**
   * Tận dụng engine OCR tích hợp sẵn của hệ điều hành qua **Windows Runtime (WinRT) Projections**, giảm 50MB dung lượng ứng dụng so với việc đóng gói binary Tesseract.
   * Tăng tốc tiền xử lý hình ảnh (Binarization & Contrast Boosting) bằng khối mã con trỏ trực tiếp (**C# Unsafe `LockBits` pointer manipulation**), đạt tốc độ xử lý chỉ 1-2 ms với 0 heap allocation.
-* **Multi-Monitor High-DPI Awareness:** Xử lý chính xác việc ánh xạ tọa độ giữa WPF Device Independent Pixels (DIPs) và Physical Screen Pixels trên cấu hình nhiều màn hình có DPI Scaling khác nhau (VD: 4K 150% + Full HD 100%).
-* **Quản lý Tài nguyên Unmanaged & Hủy tác vụ bất đồng bộ:** Áp dụng chuẩn `IDisposable` pattern cho các Win32 Handle (`RegisterHotKey`, `HwndSource`) và điều phối `CancellationTokenSource` để hủy ngay lập tức các HTTP request / OCR in-flight khi người dùng quét màn hình liên tục.
+* **Multi-Monitor High-DPI Awareness:** Khai báo PerMonitorV2 trong manifest; overlay phủ desktop bằng tọa độ Win32. `PointToScreen` chuyển điểm chọn WPF sang pixel vật lý trước khi gọi capture, không nhân tọa độ desktop với một DPI scale chung. Popup dùng vùng làm việc của màn hình chứa vùng chọn. Cần kiểm tra giao diện thực tế trên cấu hình nhiều màn hình khác DPI.
+* **Quản lý Tài nguyên Unmanaged & Hủy tác vụ bất đồng bộ:** Áp dụng `IDisposable` cho Win32 hooks và bitmap. Truyền token hủy qua OCR và HTTP; tác vụ sở hữu `CancellationTokenSource` và giải phóng sau khi kết thúc. Callback chỉ cập nhật giao diện khi request vẫn hiện hành.
+* **Ngôn ngữ OCR:** `Windows Default` dùng ngôn ngữ được hỗ trợ trong hồ sơ Windows, dự phòng sang gói OCR đã cài. Lựa chọn `Auto Detect` trong settings cũ được chuyển sang tên mới. Nếu người dùng chọn ngôn ngữ cụ thể chưa cài, ứng dụng báo thiếu gói thay vì âm thầm dùng tiếng Anh.
+* **Cache và settings:** Gemini xử lý từng request qua semaphore; đổi API key sẽ xóa cache model và cooldown trong RAM. Khi mọi model đang cooldown, ứng dụng dừng gọi mạng. Settings đồng bộ đọc/sửa/ghi theo đường dẫn trong cùng tiến trình, ghi vào file tạm rồi thay thế; lưu tùy chọn giữ model thành công mới nhất.
 
 ---
 
@@ -95,7 +97,7 @@ Khi viết vào CV (phần Projects / Technical Experience), hãy sử dụng c�
 > **Trả lời:**  
 > "Tôi áp dụng mô hình **Asynchronous Pipeline** kết hợp quản lý **Vòng đời CancellationToken**:
 > 1. Toàn bộ các thao tác nặng như chuyển đổi ảnh (`BitmapDecoder.CreateAsync`), OCR (`engine.RecognizeAsync`) và gọi mạng (`HttpClient.SendAsync`) đều là non-blocking async/await và không block luồng WPF Dispatcher.
-> 2. Khi người dùng bấm phím tắt chụp liên tiếp, `CancellationTokenSource` cũ sẽ được gọi `.Cancel()` và `.Dispose()` ngay lập tức để ngắt request đang bay trên mạng, ngăn chặn tình trạng cập nhật kết quả đè lên nhau (Race Condition) và tiết kiệm tài nguyên mạng."
+> 2. Khi người dùng hoàn tất vùng chọn mới, token của tác vụ cũ được hủy. Mỗi tác vụ tự giải phóng `CancellationTokenSource` trong lúc kết thúc; callback kiểm tra request hiện hành trước khi cập nhật UI. Hủy từ người dùng được giữ nguyên là `OperationCanceledException`, không bị đổi thành timeout để thử model khác."
 
 ---
 
@@ -115,11 +117,8 @@ Khi viết vào CV (phần Projects / Technical Experience), hãy sử dụng c�
 ### Câu 5: "Ứng dụng này xử lý DPI Scaling trên hệ thống nhiều màn hình (Multi-Monitor) ra sao?"
 > **Trả lời:**  
 > "Trong Windows, toạ độ WPF sử dụng đơn vị Device Independent Pixels (1 DIP = 1/96 inch), trong khi hàm GDI+ `CopyFromScreen` lại yêu cầu toạ độ pixel vật lý (Physical Pixels).  
-> Nếu người dùng dùng màn hình 4K scale 150% hoặc laptop scale 125%, toạ độ WPF sẽ bị co lại so với điểm ảnh thực tế.  
-> Do đó, tôi dùng `VisualTreeHelper.GetDpi(window)` để lấy chính xác tỉ lệ scale `dpiScaleX` và `dpiScaleY`, sau đó chuyển đổi:
-> `physicalX = (int)Math.Round(area.X * dpiScaleX)`  
-> `physicalWidth = (int)Math.Round(area.Width * dpiScaleX)`  
-> Nhờ đó, ảnh chụp bitmap luôn khớp từng pixel với vùng người dùng đã khoanh trên màn hình, không bị mờ hay lệch chữ."
+> Ứng dụng khai báo PerMonitorV2 trong manifest và đặt overlay theo giới hạn desktop vật lý từ Win32. Điểm đầu/cuối của vùng chọn được chuyển bằng `OverlayCanvas.PointToScreen`; vùng pixel này được truyền trực tiếp cho `CopyFromScreen`, bao gồm cả tọa độ âm.
+> Không dùng một hệ số DPI để nhân toàn bộ tọa độ desktop. Popup được đặt trên màn hình chứa vùng chọn bằng `MonitorFromPoint` và giới hạn trong vùng làm việc của màn hình đó. Cần kiểm tra cấu hình nhiều màn hình khác DPI bằng thao tác thực tế để xác nhận phần hiển thị."
 
 ---
 

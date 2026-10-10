@@ -7,6 +7,17 @@ namespace ScreenTranslator.Tests;
 public class MainViewModelTests
 {
     [Fact]
+    public void Constructor_WithLegacyAutoDetect_UsesWindowsDefaultAndPersistsMigration()
+    {
+        var storage = new InMemorySettingsService();
+        storage.Save(new AppSettings { SourceLanguage = "Auto Detect" });
+        var viewModel = new MainViewModel(storage);
+        Assert.Equal("Windows Default", viewModel.SelectedSourceLanguage);
+        viewModel.SaveSettings();
+        Assert.Equal("Windows Default", storage.Load().SourceLanguage);
+    }
+
+    [Fact]
     public void Constructor_LoadsSettingsFromServiceCorrectly()
     {
         // Arrange

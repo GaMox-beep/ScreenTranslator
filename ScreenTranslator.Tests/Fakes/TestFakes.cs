@@ -14,7 +14,7 @@ public class FakeScreenCaptureService : IScreenCaptureService
     public int CaptureCallCount { get; private set; }
     public Rect LastCapturedArea { get; private set; }
 
-    public Bitmap CaptureRegion(Rect area, double dpiScaleX = 1.0, double dpiScaleY = 1.0)
+    public Bitmap CaptureRegion(Rect area)
     {
         CaptureCallCount++;
         LastCapturedArea = area;
@@ -27,11 +27,13 @@ public class FakeOcrEngine : IOcrEngine
     public string TextToReturn { get; set; } = "Hello World";
     public int RecognizeCallCount { get; private set; }
     public string? LastLanguageCode { get; private set; }
+    public CancellationToken LastCancellationToken { get; private set; }
 
-    public Task<string> RecognizeTextAsync(Bitmap bitmap, string languageCode = "Auto Detect")
+    public Task<string> RecognizeTextAsync(Bitmap bitmap, string languageCode = "Windows Default", CancellationToken cancellationToken = default)
     {
         RecognizeCallCount++;
         LastLanguageCode = languageCode;
+        LastCancellationToken = cancellationToken;
         return Task.FromResult(TextToReturn);
     }
 }
@@ -45,6 +47,7 @@ public class FakeTranslator : ITranslator
     public string? LastApiKey { get; private set; }
     public TimeSpan Delay { get; set; } = TimeSpan.Zero;
     public Exception? ExceptionToThrow { get; set; }
+    public Action? BeforeReturn { get; set; }
 
     public async Task<string> TranslateAsync(
         string text,
@@ -68,6 +71,7 @@ public class FakeTranslator : ITranslator
             throw ExceptionToThrow;
         }
 
+        BeforeReturn?.Invoke();
         return TranslationToReturn;
     }
 }

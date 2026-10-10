@@ -1,41 +1,39 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-
-using System.Windows.Media;
+using System.Windows.Threading;
+using ScreenTranslator.Services.Capture;
 
 namespace ScreenTranslator.Views;
 
 public partial class SnippingOverlay : Window
 {
     private Point _startPoint;
+    private Point _startScreenPoint;
     private bool _isSelecting;
+    private readonly Func<Rect, Task> _onAreaSelected;
 
-    public event Action<Rect, double, double>? AreaSelected;
-
-    public SnippingOverlay()
+    private SnippingOverlay(Func<Rect, Task> onAreaSelected)
     {
+        _onAreaSelected = onAreaSelected;
         InitializeComponent();
-
-        // Bao phủ toàn bộ các màn hình
-        Left = SystemParameters.VirtualScreenLeft;
-        Top = SystemParameters.VirtualScreenTop;
-        Width = SystemParameters.VirtualScreenWidth;
-        Height = SystemParameters.VirtualScreenHeight;
 
         Loaded += (_, _) =>
         {
+            ScreenCoordinates.CoverVirtualDesktop(this);
             // Căn giữa huy hiệu hướng dẫn
+            OverlayCanvas.UpdateLayout();
             var badgeWidth = InstructionBadge.ActualWidth > 0 ? InstructionBadge.ActualWidth : 480;
-            Canvas.SetLeft(InstructionBadge, (Width - badgeWidth) / 2);
+            Canvas.SetLeft(InstructionBadge, (OverlayCanvas.ActualWidth - badgeWidth) / 2);
             Focus();
         };
     }
 
     private static SnippingOverlay? _currentOverlay;
 
-    public static void StartSnipping(Action<Rect, double, double> onAreaSelected)
+    public static void StartSnipping(Func<Rect, Task> onAreaSelected)
     {
+        ArgumentNullException.ThrowIfNull(onAreaSelected);
         // Nếu màn hình quét đang mở sẵn, bấm Alt+Q lần nữa sẽ hủy/đóng thay vì mở đè lên làm tối màn hình
         if (_currentOverlay != null)
         {
@@ -43,10 +41,9 @@ public partial class SnippingOverlay : Window
             return;
         }
 
-        var overlay = new SnippingOverlay();
+        var overlay = new SnippingOverlay(onAreaSelected);
         _currentOverlay = overlay;
         overlay.Closed += (_, _) => _currentOverlay = null;
-        overlay.AreaSelected += onAreaSelected;
         overlay.Show();
         overlay.Activate();
     }
@@ -62,6 +59,7 @@ public partial class SnippingOverlay : Window
         if (e.ChangedButton == MouseButton.Left)
         {
             _startPoint = e.GetPosition(OverlayCanvas);
+            _startScreenPoint = OverlayCanvas.PointToScreen(_startPoint);
             _isSelecting = true;
 
             Canvas.SetLeft(SelectionBox, _startPoint.X);
@@ -91,7 +89,7 @@ public partial class SnippingOverlay : Window
         SelectionBox.Height = height;
     }
 
-    private void Window_MouseUp(object sender, MouseButtonEventArgs e)
+    private async void Window_MouseUp(object sender, MouseButtonEventArgs e)
     {
         if (!_isSelecting || e.ChangedButton != MouseButton.Left) return;
 
@@ -100,19 +98,15 @@ public partial class SnippingOverlay : Window
 
         var currentPoint = e.GetPosition(OverlayCanvas);
 
-        var x = Math.Min(_startPoint.X, currentPoint.X);
-        var y = Math.Min(_startPoint.Y, currentPoint.Y);
-        var width = Math.Abs(currentPoint.X - _startPoint.X);
-        var height = Math.Abs(currentPoint.Y - _startPoint.Y);
-
-        var dpi = VisualTreeHelper.GetDpi(this);
+        var pixelArea = new Rect(_startScreenPoint, OverlayCanvas.PointToScreen(currentPoint));
         Close();
 
         // Chỉ xử lý nếu vùng quét đủ lớn (lớn hơn 10x10 pixel để tránh click nhầm)
-        if (width > 10 && height > 10)
+        if (pixelArea.Width > 10 && pixelArea.Height > 10)
         {
-            var absoluteRect = new Rect(x + Left, y + Top, width, height);
-            AreaSelected?.Invoke(absoluteRect, dpi.DpiScaleX, dpi.DpiScaleY);
+            // Let WPF remove the overlay before copying desktop pixels.
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            await _onAreaSelected(pixelArea);
         }
     }
 

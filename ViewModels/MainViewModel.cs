@@ -8,7 +8,7 @@ public class MainViewModel : ViewModelBase
     private readonly ISettingsService _settingsService;
     private readonly AppSettings _settings;
     private string _apiKey = string.Empty;
-    private string _selectedSourceLanguage = "Auto Detect";
+    private string _selectedSourceLanguage = "Windows Default";
     private string _selectedTargetLanguage = "Vietnamese";
     private string _selectedModifier = "Alt";
     private string _selectedKey = "Q";
@@ -84,7 +84,7 @@ public class MainViewModel : ViewModelBase
 
         SelectedSourceLanguage = SourceLanguages.Contains(_settings.SourceLanguage)
             ? _settings.SourceLanguage
-            : "Auto Detect";
+            : "Windows Default";
 
         SelectedTargetLanguage = TargetLanguages.Contains(_settings.TargetLanguage)
             ? _settings.TargetLanguage

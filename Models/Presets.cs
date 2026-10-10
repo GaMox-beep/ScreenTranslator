@@ -4,7 +4,7 @@ public static class LanguagePresets
 {
     public static readonly IReadOnlyList<string> SourceLanguages = new[]
     {
-        "Auto Detect",
+        "Windows Default",
         "English",
         "Japanese",
         "Chinese",

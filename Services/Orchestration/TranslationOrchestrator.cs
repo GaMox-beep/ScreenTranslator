@@ -33,19 +33,20 @@ public class TranslationOrchestrator : ITranslationOrchestrator
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             callbacks.OnStatusChanged("Đang nhận diện chữ...", false);
 
             // 1. Chụp ảnh vùng chọn hoàn toàn trong RAM
             var captureSw = Stopwatch.StartNew();
-            using var bitmap = _captureService.CaptureRegion(request.SelectedArea, request.DpiScaleX, request.DpiScaleY);
+            using var bitmap = _captureService.CaptureRegion(request.PixelArea);
             captureSw.Stop();
-            AppLogger.Log($"[CAPTURE] Screen capture completed in {captureSw.ElapsedMilliseconds} ms (Width={bitmap.Width}px, Height={bitmap.Height}px, DpiScale={request.DpiScaleX:0.00}x{request.DpiScaleY:0.00}).");
+            AppLogger.Log($"[CAPTURE] Screen capture completed in {captureSw.ElapsedMilliseconds} ms (Width={bitmap.Width}px, Height={bitmap.Height}px).");
 
             cancellationToken.ThrowIfCancellationRequested();
 
             // 2. Nhận diện chữ bằng OCR Engine
             var ocrSw = Stopwatch.StartNew();
-            var recognizedText = await _ocrEngine.RecognizeTextAsync(bitmap, request.SourceLanguage);
+            var recognizedText = await _ocrEngine.RecognizeTextAsync(bitmap, request.SourceLanguage, cancellationToken);
             ocrSw.Stop();
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -86,6 +87,7 @@ public class TranslationOrchestrator : ITranslationOrchestrator
                 cancellationToken);
 
             translateSw.Stop();
+            cancellationToken.ThrowIfCancellationRequested();
             callbacks.OnSuccess(translatedText);
             totalSw.Stop();
 
@@ -98,12 +100,13 @@ public class TranslationOrchestrator : ITranslationOrchestrator
             var previewText = cleanPreview.Length > 50 ? cleanPreview[..47] + "..." : cleanPreview;
             callbacks.OnStatusChanged($"Đã dịch ({translateSw.ElapsedMilliseconds}ms): \"{previewText}\"", false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             AppLogger.Log("[CANCEL] Translation cancelled due to subsequent capture request.");
         }
         catch (Exception ex)
         {
+            if (cancellationToken.IsCancellationRequested) return;
             totalSw.Stop();
             AppLogger.Log($"[ERROR] Pipeline execution failed after {totalSw.ElapsedMilliseconds} ms: Exception={ex.GetType().Name}, Message=\"{ex.Message}\"");
             callbacks.OnError(ex.Message);

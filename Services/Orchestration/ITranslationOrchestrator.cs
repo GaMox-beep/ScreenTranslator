@@ -3,9 +3,7 @@ using System.Windows;
 namespace ScreenTranslator.Services.Orchestration;
 
 public record TranslationPipelineRequest(
-    Rect SelectedArea,
-    double DpiScaleX,
-    double DpiScaleY,
+    Rect PixelArea,
     string SourceLanguage,
     string TargetLanguage,
     string ApiKey);
