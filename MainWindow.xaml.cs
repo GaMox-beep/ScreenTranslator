@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     private readonly GlobalHotkeyManager _hotkeyManager = new();
     private readonly ITranslationOrchestrator _orchestrator;
     private CancellationTokenSource? _translationCts;
+    private bool _isClosing;
     private MainViewModel ViewModel => (MainViewModel)DataContext;
 
     public MainWindow() : this(
@@ -37,8 +38,10 @@ public partial class MainWindow : Window
         Loaded += (_, _) => RegisterCurrentHotkey();
         Closing += (_, _) =>
         {
+            _isClosing = true;
             _hotkeyManager.Dispose();
             _translationCts?.Cancel();
+            ResultPopup.CloseCurrent();
         };
         _hotkeyManager.HotkeyPressed += OnHotkeyPressed;
 
@@ -50,7 +53,8 @@ public partial class MainWindow : Window
         var success = _hotkeyManager.Register(this, ViewModel.SelectedModifier, ViewModel.SelectedKey);
         if (success)
         {
-            ViewModel.SetStatus($"● Đang hoạt động (Phím tắt: {ViewModel.SelectedModifier} + {ViewModel.SelectedKey})", isError: false);
+            if (!ViewModel.IsStatusError)
+                ViewModel.SetStatus($"● Đang hoạt động (Phím tắt: {ViewModel.SelectedModifier} + {ViewModel.SelectedKey})", isError: false);
             AppLogger.Log($"[HOTKEY] Global hotkey registered successfully: Modifier={ViewModel.SelectedModifier}, Key={ViewModel.SelectedKey}");
         }
         else
@@ -66,10 +70,12 @@ public partial class MainWindow : Window
         SnippingOverlay.StartSnipping(async area =>
         {
             _translationCts?.Cancel();
+            ResultPopup.CloseCurrent();
             using var requestCts = new CancellationTokenSource();
             _translationCts = requestCts;
             var cancellationToken = requestCts.Token;
-            bool IsCurrentRequest() => !cancellationToken.IsCancellationRequested && ReferenceEquals(_translationCts, requestCts);
+            bool OwnsRequest() => !_isClosing && ReferenceEquals(_translationCts, requestCts);
+            bool IsCurrentRequest() => !cancellationToken.IsCancellationRequested && OwnsRequest();
 
             ResultPopup? popup = null;
 
@@ -84,11 +90,25 @@ public partial class MainWindow : Window
                 {
                     if (!IsCurrentRequest()) return;
                     var popupPosition = new Point(area.X, area.Bottom + 6);
-                    popup = ResultPopup.ShowLoading(popupPosition);
+                    popup = ResultPopup.ShowLoading(popupPosition, request.SourceLanguage, request.TargetLanguage, requestCts.Cancel);
                 },
                 OnSuccess: text => { if (IsCurrentRequest()) popup?.UpdateSuccess(text); },
-                OnError: err => { if (IsCurrentRequest()) popup?.UpdateError(err); },
-                OnStatusChanged: (status, isError) => { if (IsCurrentRequest()) ViewModel.SetStatus(status, isError); });
+                OnError: err =>
+                {
+                    if (!IsCurrentRequest()) return;
+                    popup ??= ResultPopup.ShowLoading(new Point(area.X, area.Bottom + 6), request.SourceLanguage, request.TargetLanguage, requestCts.Cancel);
+                    popup.UpdateError(err);
+                },
+                OnStatusChanged: (status, isError) => { if (IsCurrentRequest()) ViewModel.SetStatus(status, isError); },
+                OnProgress: status => { if (IsCurrentRequest()) popup?.UpdateProgress(status); },
+                OnOriginalText: text => { if (IsCurrentRequest()) popup?.UpdateOriginalText(text); },
+                OnCancelled: () =>
+                {
+                    if (!OwnsRequest()) return;
+                    if (popup?.IsLoaded == true) popup.UpdateCancelled();
+                    ViewModel.SetStatus("Đã hủy tác vụ.");
+                },
+                OnNoText: () => { if (IsCurrentRequest()) popup?.UpdateNoText(); });
 
             try
             {
@@ -96,7 +116,7 @@ public partial class MainWindow : Window
             }
             finally
             {
-                if (cancellationToken.IsCancellationRequested && popup?.IsLoaded == true) popup.Close();
+                if (cancellationToken.IsCancellationRequested && !OwnsRequest() && popup?.IsLoaded == true) popup.Close();
                 if (ReferenceEquals(_translationCts, requestCts)) _translationCts = null;
             }
         });
@@ -109,7 +129,7 @@ public partial class MainWindow : Window
 
     private void BtnSave_Click(object sender, RoutedEventArgs e)
     {
-        ViewModel.SaveSettings();
+        if (!ViewModel.SaveSettings()) return;
         RegisterCurrentHotkey();
         AppLogger.Log("[SETTINGS] User configuration saved successfully.");
     }

@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:ScreenTranslator.ViewModels"
         Title="ScreenTranslator - Cài đặt" 
-        Width="480" Height="360"
+        Width="480" Height="400"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanMinimize">
 
@@ -30,7 +30,8 @@
 
                 <!-- API Key -->
                 <Label Grid.Column="0" Content="API Key:" VerticalAlignment="Center"/>
-                <PasswordBox x:Name="TxtApiKey" Grid.Column="1" Height="26" 
+                <PasswordBox x:Name="TxtApiKey" Grid.Column="1" Height="26"
+                             ToolTip="API key được mã hóa cho tài khoản Windows hiện tại. Khi chuyển máy hoặc tài khoản Windows, hãy nhập lại key."
                              VerticalContentAlignment="Center"
                              PasswordChanged="TxtApiKey_PasswordChanged"/>
             </Grid>
@@ -86,8 +87,7 @@
         </GroupBox>
 
         <!-- Nút thao tác & Trạng thái -->
-        <DockPanel Grid.Row="4" LastChildFill="False">
-            <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" DockPanel.Dock="Left">
+        <TextBlock Grid.Row="3" Text="{Binding StatusText}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,0,8">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
                         <Setter Property="Foreground" Value="#107C41"/>
@@ -98,8 +98,8 @@
                         </Style.Triggers>
                     </Style>
                 </TextBlock.Style>
-            </TextBlock>
-
+        </TextBlock>
+        <DockPanel Grid.Row="4" LastChildFill="False">
             <Button x:Name="BtnSave" Content="Lưu Cài Đặt" Width="100" Height="28" 
                     DockPanel.Dock="Right" Click="BtnSave_Click"/>
             <Button x:Name="BtnTestCapture" Content="Chụp Thử" Width="90" Height="28" 

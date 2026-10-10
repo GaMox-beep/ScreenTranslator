@@ -34,20 +34,25 @@ public class TranslationOrchestrator : ITranslationOrchestrator
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            callbacks.OnStatusChanged("Đang nhận diện chữ...", false);
+            callbacks.OnStatusChanged("Đang chụp vùng chọn...", false);
 
             // 1. Chụp ảnh vùng chọn hoàn toàn trong RAM
             var captureSw = Stopwatch.StartNew();
-            using var bitmap = _captureService.CaptureRegion(request.PixelArea);
-            captureSw.Stop();
-            AppLogger.Log($"[CAPTURE] Screen capture completed in {captureSw.ElapsedMilliseconds} ms (Width={bitmap.Width}px, Height={bitmap.Height}px).");
-
-            cancellationToken.ThrowIfCancellationRequested();
-
-            // 2. Nhận diện chữ bằng OCR Engine
-            var ocrSw = Stopwatch.StartNew();
-            var recognizedText = await _ocrEngine.RecognizeTextAsync(bitmap, request.SourceLanguage, cancellationToken);
-            ocrSw.Stop();
+            var ocrSw = new Stopwatch();
+            string recognizedText;
+            using (var bitmap = await Task.Run(() => _captureService.CaptureRegion(request.PixelArea), cancellationToken))
+            {
+                captureSw.Stop();
+                cancellationToken.ThrowIfCancellationRequested();
+                AppLogger.Log($"[CAPTURE] Completed in {captureSw.ElapsedMilliseconds} ms (Width={bitmap.Width}px, Height={bitmap.Height}px).");
+                // The popup is shown only after pixels have been captured, so it cannot obscure the selection.
+                callbacks.OnLoading();
+                callbacks.OnProgress?.Invoke("Đang nhận diện chữ...");
+                callbacks.OnStatusChanged("Đang nhận diện chữ...", false);
+                ocrSw.Start();
+                recognizedText = await _ocrEngine.RecognizeTextAsync(bitmap, request.SourceLanguage, cancellationToken);
+                ocrSw.Stop();
+            }
 
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -56,14 +61,12 @@ public class TranslationOrchestrator : ITranslationOrchestrator
             {
                 AppLogger.Log($"[OCR] OCR completed in {ocrSw.ElapsedMilliseconds} ms: No recognizable words in selection (Length={recognizedText?.Length ?? 0}). Skipped translation.");
                 callbacks.OnStatusChanged("Không tìm thấy văn bản nào trong vùng chọn.", false);
+                callbacks.OnNoText?.Invoke();
                 return;
             }
 
-            var cleanPreview = recognizedText.Replace(Environment.NewLine, " ");
-            AppLogger.Log($"[OCR] OCR completed in {ocrSw.ElapsedMilliseconds} ms (Length={recognizedText.Length} chars): \"{cleanPreview}\"");
-
-            // 4. Mở popup hiển thị trạng thái đang dịch
-            callbacks.OnLoading();
+            AppLogger.Log($"[OCR] Completed in {ocrSw.ElapsedMilliseconds} ms (Length={recognizedText.Length} chars).");
+            callbacks.OnOriginalText?.Invoke(recognizedText);
 
             // 5. Kiểm tra API Key
             if (string.IsNullOrWhiteSpace(request.ApiKey))
@@ -77,6 +80,8 @@ public class TranslationOrchestrator : ITranslationOrchestrator
 
             // 6. Gọi dịch thuật
             var translateSw = Stopwatch.StartNew();
+            callbacks.OnProgress?.Invoke("Đang dịch...");
+            callbacks.OnStatusChanged("Đang dịch...", false);
             AppLogger.Log($"[TRANSLATE] Starting translation pipeline (Source={request.SourceLanguage}, Target={request.TargetLanguage}, InputChars={recognizedText.Length})...");
 
             var translatedText = await _translator.TranslateAsync(
@@ -91,22 +96,23 @@ public class TranslationOrchestrator : ITranslationOrchestrator
             callbacks.OnSuccess(translatedText);
             totalSw.Stop();
 
-            var shortTranslated = translatedText.Replace(Environment.NewLine, " ");
-            if (shortTranslated.Length > 100) shortTranslated = shortTranslated[..97] + "...";
-
-            AppLogger.Log($"[TRANSLATE] Translation finished in {translateSw.ElapsedMilliseconds} ms (OutputChars={translatedText.Length}): \"{shortTranslated}\"");
+            AppLogger.Log($"[TRANSLATE] Finished in {translateSw.ElapsedMilliseconds} ms (OutputChars={translatedText.Length}).");
             AppLogger.Log($"[TOTAL] End-to-end pipeline finished in {totalSw.ElapsedMilliseconds} ms (Capture={captureSw.ElapsedMilliseconds}ms, OCR={ocrSw.ElapsedMilliseconds}ms, Translate={translateSw.ElapsedMilliseconds}ms).\n");
 
-            var previewText = cleanPreview.Length > 50 ? cleanPreview[..47] + "..." : cleanPreview;
-            callbacks.OnStatusChanged($"Đã dịch ({translateSw.ElapsedMilliseconds}ms): \"{previewText}\"", false);
+            callbacks.OnStatusChanged($"Đã dịch xong ({totalSw.ElapsedMilliseconds} ms).", false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             AppLogger.Log("[CANCEL] Translation cancelled due to subsequent capture request.");
+            callbacks.OnCancelled?.Invoke();
         }
         catch (Exception ex)
         {
-            if (cancellationToken.IsCancellationRequested) return;
+            if (cancellationToken.IsCancellationRequested)
+            {
+                callbacks.OnCancelled?.Invoke();
+                return;
+            }
             totalSw.Stop();
             AppLogger.Log($"[ERROR] Pipeline execution failed after {totalSw.ElapsedMilliseconds} ms: Exception={ex.GetType().Name}, Message=\"{ex.Message}\"");
             callbacks.OnError(ex.Message);

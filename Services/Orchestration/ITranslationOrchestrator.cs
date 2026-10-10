@@ -12,7 +12,11 @@ public record TranslationPipelineCallbacks(
     Action OnLoading,
     Action<string> OnSuccess,
     Action<string> OnError,
-    Action<string, bool> OnStatusChanged);
+    Action<string, bool> OnStatusChanged,
+    Action<string>? OnProgress = null,
+    Action<string>? OnOriginalText = null,
+    Action? OnCancelled = null,
+    Action? OnNoText = null);
 
 public interface ITranslationOrchestrator
 {

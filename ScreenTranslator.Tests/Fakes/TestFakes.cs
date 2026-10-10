@@ -13,12 +13,16 @@ public class FakeScreenCaptureService : IScreenCaptureService
 {
     public int CaptureCallCount { get; private set; }
     public Rect LastCapturedArea { get; private set; }
+    public Bitmap? LastBitmap { get; private set; }
+    public Action? BeforeCapture { get; set; }
 
     public Bitmap CaptureRegion(Rect area)
     {
         CaptureCallCount++;
         LastCapturedArea = area;
-        return new Bitmap(100, 100, PixelFormat.Format32bppArgb);
+        BeforeCapture?.Invoke();
+        LastBitmap = new Bitmap(100, 100, PixelFormat.Format32bppArgb);
+        return LastBitmap;
     }
 }
 

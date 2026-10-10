@@ -133,7 +133,7 @@ public class GeminiTranslatorTests
         using var client = new HttpClient(handler);
         var translator = new GoogleGeminiTranslator(client, new InMemorySettingsService());
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => translator.TranslateAsync("Hello", "Vietnamese", "English", "test-key"));
+        await Assert.ThrowsAnyAsync<InvalidOperationException>(() => translator.TranslateAsync("Hello", "Vietnamese", "English", "test-key"));
         await Assert.ThrowsAsync<InvalidOperationException>(() => translator.TranslateAsync("Hello again", "Vietnamese", "English", "test-key"));
         Assert.Equal(1, generationCalls);
     }

@@ -9,7 +9,7 @@
         Topmost="True"
         ShowInTaskbar="False"
         SizeToContent="WidthAndHeight"
-        MinWidth="300"
+        MinWidth="430"
         MaxWidth="750"
         MinHeight="120"
         MaxHeight="550"
@@ -18,6 +18,10 @@
     <Window.DataContext>
         <vm:ResultViewModel />
     </Window.DataContext>
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolVisibility" />
+    </Window.Resources>
 
     <Border Background="#1E222D"
             BorderBrush="#384152"
@@ -28,6 +32,8 @@
             MaxWidth="750">
         <Grid>
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
@@ -48,6 +54,10 @@
 
                 <!-- Nút thao tác dạng text thuần túy -->
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="BtnCancel" Content="Hủy" Click="BtnCancel_Click"
+                            Visibility="{Binding IsLoading, Converter={StaticResource BoolVisibility}}"
+                            Padding="8,2" Margin="0,0,6,0" FontSize="11"
+                            Background="#2A303C" Foreground="#E5E7EB" BorderBrush="#4B5563" Cursor="Hand" />
                     <Button x:Name="BtnCopy"
                             Content="{Binding CopyButtonText}"
                             Click="BtnCopy_Click"
@@ -82,12 +92,24 @@
                 </StackPanel>
             </Grid>
 
+            <Grid Grid.Row="1" Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding LanguagePair}" Foreground="#9CA3AF" FontSize="11" />
+                <TextBlock Grid.Column="1" Text="{Binding ElapsedText}" Foreground="#9CA3AF" FontSize="11" Margin="12,0,0,0" />
+            </Grid>
+            <ProgressBar Grid.Row="2" Height="3" Margin="0,0,0,10" IsIndeterminate="True"
+                         Visibility="{Binding IsLoading, Converter={StaticResource BoolVisibility}}" />
+
             <!-- Nội dung dịch / thông báo trạng thái -->
             <ScrollViewer x:Name="ContentScrollViewer"
-                          Grid.Row="1"
-                          MaxHeight="480"
+                          Grid.Row="3"
+                          MaxHeight="400"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
                 <TextBox x:Name="TxtResult"
                          Text="{Binding DisplayText, Mode=OneWay}"
                          TextWrapping="Wrap"
@@ -113,6 +135,17 @@
                         </Style>
                     </TextBox.Style>
                 </TextBox>
+                <Expander x:Name="OriginalExpander" Header="Văn bản gốc (OCR)" Margin="0,14,0,0" Foreground="#9CA3AF"
+                          Visibility="{Binding HasOriginalText, Converter={StaticResource BoolVisibility}}">
+                    <StackPanel Margin="0,6,0,0">
+                        <Button x:Name="BtnCopyOriginal" Content="Sao chép văn bản gốc" Click="BtnCopyOriginal_Click"
+                                HorizontalAlignment="Left" Padding="8,3" Margin="0,0,0,6" FontSize="11"
+                                Background="#2A303C" Foreground="#E5E7EB" BorderBrush="#4B5563" Cursor="Hand" />
+                        <TextBox Text="{Binding OriginalText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
+                                 Background="Transparent" Foreground="#D1D5DB" BorderThickness="0" FontSize="12" />
+                    </StackPanel>
+                </Expander>
+                </StackPanel>
             </ScrollViewer>
         </Grid>
     </Border>

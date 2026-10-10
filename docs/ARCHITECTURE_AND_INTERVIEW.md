@@ -32,22 +32,24 @@ sequenceDiagram
     Note over Main, Orchestrator: Bắt đầu chuỗi xử lý qua Seam ITranslationOrchestrator
     Main->>Orchestrator: ProcessAsync(request, callbacks, cancellationToken)
     
-    Orchestrator->>Capture: CaptureRegion(PixelArea)
+    Orchestrator->>Capture: CaptureRegion(PixelArea) trên worker
     Note over Capture: Dùng trực tiếp tọa độ pixel vật lý, gồm tọa độ âm<br/>CopyFromScreen (GDI+ BitBlt) trong RAM
     Capture-->>Orchestrator: System.Drawing.Bitmap (32bpp)
+    Orchestrator->>Popup: onLoading() -> Hiển thị trạng thái nhận diện và nút Hủy
 
     Orchestrator->>OCR: RecognizeTextAsync(bitmap, sourceLanguage, cancellationToken)
-    Note over OCR: 1. Scale thông minh nếu ảnh nhỏ (< 140px: 2x)<br/>2. Con trỏ Unsafe LockBits tăng độ tương phản<br/>3. WinRT SoftwareBitmap -> OcrEngine.RecognizeAsync
+    Note over OCR: 1. Scale trong giới hạn cả hai chiều của WinRT<br/>2. Histogram tăng tương phản liên tục, đảo nền tối<br/>3. BGRA buffer -> SoftwareBitmap -> RecognizeAsync
     OCR-->>Orchestrator: Chuỗi nhận diện được
 
     alt Chuỗi rỗng hoặc chỉ có dấu câu/ký tự rác
         Note over Orchestrator: Token Guard: !text.Any(char.IsLetterOrDigit)
         Orchestrator->>Main: onStatusChanged("Không tìm thấy văn bản nào trong vùng chọn.")
+        Orchestrator->>Popup: onNoText() -> Dừng trạng thái chờ
         Note over Orchestrator: Dừng lại ngay — Tiết kiệm 100% Token API & chi phí mạng
     else Có văn bản hợp lệ
-        Orchestrator->>Popup: onLoading() -> Hiển thị Loading Window gần con trỏ
+        Orchestrator->>Popup: onOriginalText(text), onProgress("Đang dịch...")
         Orchestrator->>Gemini: TranslateAsync(text, targetLang, sourceLang, apiKey)
-        Note over Gemini: 1. Fast-Path: Gọi ngay model đang hoạt động (< 500ms)<br/>2. Nếu 429/503: Đưa vào Cooldown Dictionary<br/>3. Dynamic Discovery & Rotation: Tự động đảo sang model dự phòng
+        Note over Gemini: Hướng dẫn ngôn ngữ nguồn/đích nằm trong systemInstruction<br/>HTTP status quyết định retry; tôn trọng Retry-After/RetryInfo<br/>Văn bản OCR giữ nguyên trong contents
         Gemini-->>Orchestrator: Bản dịch hoàn chỉnh
         Orchestrator->>Popup: onSuccess(translatedText)
         Orchestrator->>Main: onStatusChanged("Đã dịch xong (xxx ms)")
@@ -62,15 +64,17 @@ Khi viết vào CV (phần Projects / Technical Experience), hãy sử dụng c�
 
 * **Kiến trúc Deep Module & Tách Seam (Clean Architecture):** Tách biệt ranh giới rõ ràng giữa UI (WPF), Nghiệp vụ (Deep Module `TranslationOrchestrator`), và Hạ tầng (Win32, WinRT, Gemini REST API). Sử dụng `Microsoft.Extensions.DependencyInjection` làm Composition Root, đạt **100% testability** mà không phụ thuộc vào UI hay môi trường thật.
 * **Tối ưu hóa Chi phí & Quota LLM (Resilient AI Pipeline):**
-  * **Fast-Path & Dynamic Quota Rotation:** Thiết kế cơ chế tự động xoay vòng model (Model Rotation) khi gặp lỗi `HTTP 429 (Too Many Requests)` hoặc quá tải `503 Service Unavailable`, kết hợp Exponential Cooldown Dictionary để duy trì tính sẵn sàng 99.9% ngay cả khi dùng Free Tier Google AI Studio.
+  * **Fast-Path & Dynamic Quota Rotation:** Gọi trực tiếp model hoạt động gần nhất, xoay model khi gặp HTTP 429/503 và các lỗi server tạm thời. Cooldown ưu tiên `Retry-After`/`RetryInfo`; lỗi 400 chung, 401 và 403 dừng ngay. Chỉ thử bỏ thinking config khi lỗi 400 chỉ rõ cấu hình thinking không hợp lệ.
   * **Token Guard (Lọc rác trước khi gọi mạng):** Phân tích ngữ nghĩa kết quả OCR; triệt tiêu hoàn toàn các request rác (chỉ có dấu câu, icon hoặc nhiễu màn hình), tiết kiệm 100% token không cần thiết.
 * **Xử lý Hình ảnh & OCR Cấp độ Thấp (Low-level Imaging):**
   * Tận dụng engine OCR tích hợp sẵn của hệ điều hành qua **Windows Runtime (WinRT) Projections**, giảm 50MB dung lượng ứng dụng so với việc đóng gói binary Tesseract.
-  * Tăng tốc tiền xử lý hình ảnh (Binarization & Contrast Boosting) bằng khối mã con trỏ trực tiếp (**C# Unsafe `LockBits` pointer manipulation**), đạt tốc độ xử lý chỉ 1-2 ms với 0 heap allocation.
+  * Tiền xử lý dùng histogram và phép biến đổi liên tục để giữ nét chữ; nền tối được đảo thành nền sáng. Dữ liệu BGRA được chuyển trực tiếp bằng `SoftwareBitmap.CreateCopyFromBuffer`, bỏ bước encode/decode BMP. Test ảnh 1920×1080 đo cấp phát managed sau khi làm nóng pool: khoảng 912 byte ở đường mới so với 8.3 MB ở bước ghi BMP trước đây; số này không tính bộ nhớ bitmap native và không khẳng định độ chính xác OCR thực tế.
 * **Multi-Monitor High-DPI Awareness:** Khai báo PerMonitorV2 trong manifest; overlay phủ desktop bằng tọa độ Win32. `PointToScreen` chuyển điểm chọn WPF sang pixel vật lý trước khi gọi capture, không nhân tọa độ desktop với một DPI scale chung. Popup dùng vùng làm việc của màn hình chứa vùng chọn. Cần kiểm tra giao diện thực tế trên cấu hình nhiều màn hình khác DPI.
 * **Quản lý Tài nguyên Unmanaged & Hủy tác vụ bất đồng bộ:** Áp dụng `IDisposable` cho Win32 hooks và bitmap. Truyền token hủy qua OCR và HTTP; tác vụ sở hữu `CancellationTokenSource` và giải phóng sau khi kết thúc. Callback chỉ cập nhật giao diện khi request vẫn hiện hành.
 * **Ngôn ngữ OCR:** `Windows Default` dùng ngôn ngữ được hỗ trợ trong hồ sơ Windows, dự phòng sang gói OCR đã cài. Lựa chọn `Auto Detect` trong settings cũ được chuyển sang tên mới. Nếu người dùng chọn ngôn ngữ cụ thể chưa cài, ứng dụng báo thiếu gói thay vì âm thầm dùng tiếng Anh.
 * **Cache và settings:** Gemini xử lý từng request qua semaphore; đổi API key sẽ xóa cache model và cooldown trong RAM. Khi mọi model đang cooldown, ứng dụng dừng gọi mạng. Settings đồng bộ đọc/sửa/ghi theo đường dẫn trong cùng tiến trình, ghi vào file tạm rồi thay thế; lưu tùy chọn giữ model thành công mới nhất.
+* **API key:** File settings lưu `ProtectedApiKey` bằng Windows DPAPI `CurrentUser`; key rõ trong settings cũ được chuyển khi đọc thành công. Không giải mã được key sẽ báo nhập lại và giữ các tùy chọn khác. Bản cũ không đọc được định dạng key mã hóa; chuyển tài khoản Windows hoặc máy cần nhập lại key. Ciphertext lỗi không bị ghi đè bởi thao tác lưu model.
+* **Popup:** Hiển thị ngôn ngữ, giai đoạn OCR/dịch, thời gian, nút Hủy và phần xem/sao chép OCR gốc. Đóng popup đang chờ cũng hủy request. Bitmap capture được giải phóng sau OCR, trước khi chờ mạng. Log lưu thời gian/kích thước, không ghi nội dung OCR và bản dịch.
 
 ---
 
@@ -88,7 +92,7 @@ Khi viết vào CV (phần Projects / Technical Experience), hãy sử dụng c�
 > **Trả lời:**  
 > "API miễn phí của Google AI Studio thường xuyên gặp lỗi 429 do giới hạn RPM (Requests Per Minute) hoặc RPD (Requests Per Day), và lỗi 503 khi server quá tải. Để giải quyết, tôi xây dựng một **Resilient Pipeline** gồm 3 cơ chế:
 > 1. **Fast-Path Caching:** Lưu lại model đã phản hồi thành công gần nhất vào bộ nhớ và cấu hình để gọi trực tiếp (độ trễ < 500ms), tránh gọi dư thừa API thăm dò.
-> 2. **Cooldown & Circuit Breaker:** Khi nhận mã lỗi 429 hoặc 503, model đó ngay lập tức bị đưa vào một bảng `ConcurrentDictionary` với thời gian cách ly (cooldown: 60s cho RPM, 4 giờ cho RPD).
+> 2. **Cooldown & Circuit Breaker:** Mã HTTP và quota metadata quyết định lỗi có retry hay không. Nếu server cung cấp `Retry-After` hoặc `RetryInfo`, ứng dụng dùng thời gian đó; nếu không, dùng thời gian mặc định theo loại lỗi.
 > 3. **Dynamic Discovery & Priority Rotation:** Hệ thống tự động truy vấn danh sách các model đang hỗ trợ phương thức `generateContent` từ tài khoản của người dùng, xếp hạng ưu tiên theo phiên bản (Gemini 3.5, 3.6, Flash, Flash-Lite) và tự động trượt (rotate) sang model tốt kế tiếp khi model hiện tại bị khóa."
 
 ---
@@ -96,7 +100,7 @@ Khi viết vào CV (phần Projects / Technical Experience), hãy sử dụng c�
 ### Câu 3: "Làm thế nào để bạn đảm bảo ứng dụng không bị đơ UI (Freezing) khi người dùng chụp màn hình liên tục?"
 > **Trả lời:**  
 > "Tôi áp dụng mô hình **Asynchronous Pipeline** kết hợp quản lý **Vòng đời CancellationToken**:
-> 1. Toàn bộ các thao tác nặng như chuyển đổi ảnh (`BitmapDecoder.CreateAsync`), OCR (`engine.RecognizeAsync`) và gọi mạng (`HttpClient.SendAsync`) đều là non-blocking async/await và không block luồng WPF Dispatcher.
+> 1. Capture và tiền xử lý/chuyển buffer ảnh chạy qua `Task.Run`. OCR (`engine.RecognizeAsync`) và HTTP (`HttpClient.SendAsync`) được await với token hủy; callback trở về WPF Dispatcher để cập nhật UI.
 > 2. Khi người dùng hoàn tất vùng chọn mới, token của tác vụ cũ được hủy. Mỗi tác vụ tự giải phóng `CancellationTokenSource` trong lúc kết thúc; callback kiểm tra request hiện hành trước khi cập nhật UI. Hủy từ người dùng được giữ nguyên là `OperationCanceledException`, không bị đổi thành timeout để thử model khác."
 
 ---
@@ -126,5 +130,5 @@ Khi viết vào CV (phần Projects / Technical Experience), hãy sử dụng c�
 > **Trả lời:**  
 > "Có 3 nguy cơ rò rỉ bộ nhớ chính tôi đã xử lý:
 > 1. **Win32 Hooks & Window Interop:** `GlobalHotkeyManager` gắn hook vào `HwndSource`. Nếu không tháo hook (`RemoveHook`) và giải phóng Hotkey (`UnregisterHotKey`) khi ứng dụng đóng, Windows handle sẽ bị kẹt lại. Tôi đã áp dụng `IDisposable` và dọn dẹp tại sự kiện `Window.Closing`.
-> 2. **GDI+ Bitmaps & Streams:** Đối tượng `Bitmap` và `MemoryStream` nắm giữ bộ nhớ unmanaged. Tôi sử dụng khối `using` triệt để để đảm bảo `bitmap.Dispose()` ngay sau khi OCR trích xuất xong chuỗi.
+> 2. **GDI+ Bitmaps & buffers:** `Bitmap` và `SoftwareBitmap` được dispose bằng `using`; buffer thuê từ `ArrayPool` được xóa và trả trong `finally`. Bitmap capture được giải phóng sau OCR; timer và callback hủy của popup được dọn khi tác vụ kết thúc hoặc cửa sổ đóng.
 > 3. **Static Event Leaks:** Không dùng static event để trỏ đến các UI element hoặc ViewModel, vì việc này sẽ ngăn Garbage Collector thu gom các cửa sổ đã đóng."

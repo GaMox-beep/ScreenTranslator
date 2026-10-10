@@ -99,7 +99,7 @@ public class MainViewModel : ViewModelBase
             : "Q";
     }
 
-    public void SaveSettings()
+    public bool SaveSettings()
     {
         _settings.ApiKey = ApiKey.Trim();
         _settings.SourceLanguage = SelectedSourceLanguage;
@@ -116,6 +116,7 @@ public class MainViewModel : ViewModelBase
         {
             SetStatus(_settingsService.LastError ?? "Lỗi lưu cấu hình!", isError: true);
         }
+        return success;
     }
 
     public void SetStatus(string message, bool isError = false)

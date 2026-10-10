@@ -7,6 +7,19 @@ public class ResultViewModel : ViewModelBase
     private bool _isError;
     private string _copyButtonText = "Sao chép";
     private string _translatedContent = string.Empty;
+    private string _originalText = string.Empty;
+    private string _languagePair = string.Empty;
+    private string _elapsedText = string.Empty;
+
+    public string OriginalText
+    {
+        get => _originalText;
+        set { if (SetProperty(ref _originalText, value)) OnPropertyChanged(nameof(HasOriginalText)); }
+    }
+
+    public bool HasOriginalText => !string.IsNullOrWhiteSpace(OriginalText);
+    public string LanguagePair { get => _languagePair; set => SetProperty(ref _languagePair, value); }
+    public string ElapsedText { get => _elapsedText; set => SetProperty(ref _elapsedText, value); }
 
     public string DisplayText
     {
@@ -17,13 +30,13 @@ public class ResultViewModel : ViewModelBase
     public bool IsLoading
     {
         get => _isLoading;
-        set => SetProperty(ref _isLoading, value);
+        set { if (SetProperty(ref _isLoading, value)) OnPropertyChanged(nameof(CanCopy)); }
     }
 
     public bool IsError
     {
         get => _isError;
-        set => SetProperty(ref _isError, value);
+        set { if (SetProperty(ref _isError, value)) OnPropertyChanged(nameof(CanCopy)); }
     }
 
     public string CopyButtonText
@@ -52,6 +65,7 @@ public class ResultViewModel : ViewModelBase
         IsError = false;
         DisplayText = message;
         TranslatedContent = string.Empty;
+        OriginalText = string.Empty;
         CopyButtonText = "Sao chép";
         OnPropertyChanged(nameof(CanCopy));
     }
@@ -74,5 +88,16 @@ public class ResultViewModel : ViewModelBase
         TranslatedContent = string.Empty;
         CopyButtonText = "Sao chép";
         OnPropertyChanged(nameof(CanCopy));
+    }
+
+    public void SetCancelled() => SetMessage("Đã hủy tác vụ.");
+    public void SetNoText() => SetMessage("Không tìm thấy văn bản nào trong vùng chọn.");
+
+    private void SetMessage(string message)
+    {
+        IsLoading = false;
+        IsError = false;
+        TranslatedContent = string.Empty;
+        DisplayText = message;
     }
 }

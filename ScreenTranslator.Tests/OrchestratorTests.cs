@@ -6,6 +6,51 @@ namespace ScreenTranslator.Tests;
 
 public class OrchestratorTests
 {
+    [Fact]
+    public async Task ProcessAsync_ReportsStagesAndReleasesBitmapBeforeTranslation()
+    {
+        var stages = new List<string>();
+        string? original = null;
+        var succeeded = false;
+        _translator.BeforeReturn = () => Assert.Throws<ArgumentException>(() => _captureService.LastBitmap!.GetPixel(0, 0));
+        var callbacks = new TranslationPipelineCallbacks(
+            () => { }, _ => succeeded = true, _ => { }, (_, _) => { },
+            OnProgress: stages.Add, OnOriginalText: text => original = text);
+        await _sut.ProcessAsync(new TranslationPipelineRequest(new Rect(0, 0, 100, 100), "English", "Vietnamese", "test-key"), callbacks);
+        Assert.Equal(new[] { "Đang nhận diện chữ...", "Đang dịch..." }, stages);
+        Assert.Equal(_ocrEngine.TextToReturn, original);
+        Assert.True(succeeded);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_WhenCancelledDuringCapture_DisposesImageAndDoesNotStartOcr()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        using var cts = new CancellationTokenSource();
+        _captureService.BeforeCapture = () =>
+        {
+            started.TrySetResult();
+            if (!release.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException();
+        };
+        var cancelled = false;
+        var loaded = false;
+        var callbacks = new TranslationPipelineCallbacks(
+            () => loaded = true, _ => { }, _ => { }, (_, _) => { }, OnCancelled: () => cancelled = true);
+        var processing = _sut.ProcessAsync(new TranslationPipelineRequest(new Rect(0, 0, 100, 100), "English", "Vietnamese", "test-key"), callbacks, cts.Token);
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            cts.Cancel();
+        }
+        finally { release.Set(); }
+        await processing.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(cancelled);
+        Assert.False(loaded);
+        Assert.Equal(0, _ocrEngine.RecognizeCallCount);
+        Assert.Throws<ArgumentException>(() => _captureService.LastBitmap!.GetPixel(0, 0));
+    }
+
     private readonly FakeScreenCaptureService _captureService = new();
     private readonly FakeOcrEngine _ocrEngine = new();
     private readonly FakeTranslator _translator = new();
@@ -82,9 +127,9 @@ public class OrchestratorTests
         // Act
         await _sut.ProcessAsync(request, callbacks);
 
-        // Assert: Không được gọi translator và không mở loading popup
+        // The popup opens during OCR, but garbage never reaches the translator.
         Assert.Equal(0, _translator.TranslateCallCount);
-        Assert.False(loadingCalled);
+        Assert.True(loadingCalled);
         Assert.Null(resultText);
         Assert.Equal("Không tìm thấy văn bản nào trong vùng chọn.", statusText);
     }
@@ -165,7 +210,7 @@ public class OrchestratorTests
 
         Assert.False(published);
         Assert.False(errorPublished);
-        Assert.Equal("Đang nhận diện chữ...", status);
+        Assert.Equal("Đang dịch...", status);
         Assert.Equal(cts.Token, _ocrEngine.LastCancellationToken);
         Assert.Equal(request.PixelArea, _captureService.LastCapturedArea);
     }
